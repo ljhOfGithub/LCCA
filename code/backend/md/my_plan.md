@@ -155,6 +155,7 @@
   - submitted_at
   - expired_at
   - response_payload
+  - asr_metadata
   - status(enum nubmer)
 - 单个作答产生的文件 response_artifact
   - response_id
@@ -195,9 +196,21 @@
   - generated_at
     note: overall_cefr_level, overall_band 出现两次，表示初步结果和最终发布结果（人工矫正）
 
-## 额外文件
-
+## 其他机制
+### 多语言
 - 多语言文件
+### 评分重试机制
+等待并完成
+- 成功路径
+所有 task 都成功
+- 超时兜底
+保证不会无限等待，从提交 attempt 开始评分起，超时十分钟则放弃，并且全部使用人工重评
+- 重试次数
+累计检查 N 次还没成功就放弃
+- 提前完成
+如果所有的评分 score run 都进入终态，completed 或者 failed，则不再等待，将 failed 的部分使用人工重评
+- 网络兜底
+如果每个 score run 都完成，但是出现网络故障，导致无法 finalize attempt，则 finalise_attempt_if_ready 负责兜底
 
 ## API 设计
 
@@ -208,10 +221,10 @@ POST /api/v1/rubric/create
 POST /api/v1/rubric/{id}/edit
 GET /api/v1/rubric/{id}
 
-### 评分标准细则 criteria API
+### 评分标准细则 criterion API
 
-POST /api/v1/rubric/criteria/create
-POST /api/v1/rubric/criteria/{id}/edit
+POST /api/v1/rubric/criterion/create
+POST /api/v1/rubric/criterion/{id}/edit
 
 ### 场景实体 scenario API
 
@@ -245,7 +258,9 @@ GET /api/v1/material/{id}
 - 自动保存学生中间回答
   POST /api/v1/attempt/{aid}/task/{tid}/response/save
 - 学生上传文件
-  POST /api/v1/attempt/{aid}/task/{tid}/artifect/upload
+  POST /api/v1/attempt/{aid}/task/{tid}/artifact/upload
+- 学生修改文件
+  POST /api/v1/artifact/{aid}/update
 - 学生提交单个 task
   POST /api/v1/attempt/{aid}/task/{tid}/response/submit
 - 学生提交整个 attempt
@@ -280,6 +295,77 @@ GET /api/v1/score-run-list
 
 ```
 
+- 主体：
+student - s
+fastapi backend - be
+postgresql - pq
+object storage - s3
+redis + arq worker - q
+llm api - llm 
+asr service - asr
+
+- 流程：
+  - 阶段1 start attempt
+    - s -> be: POST  attempt/start
+    - be -> pq: insert attempt + 4 reponse
+    - pq -> be: attempt_id
+    - be -> student: attempt_id + expired_at
+    - student -> be: GET attempt/{aid}
+    - be -> pq: load scenario + task + material
+    - pq -> s3: presigned URL for materials
+    - s3 -> be: presigned URLs
+    - be -> s: full scenario + task list
+  - phase2: text task(1 2 3) autosave(loop)
+    - s -> be: POST /attempt/{aid}/task/{tid}/response
+    - be -> pq: update response
+    - pq -> be: return ok
+    - be -> s: auto save
+    - s -> be: POST /attempt/{aid}/task/{tid}/submit
+    - be -> pq: transform response status
+    - be -> s: return ok
+  - phase3: task4 audio upload
+    - s -> be: POST /attempt/{aid}/task/{tid}/artifact/upload
+    - be -> pq: generate key + insert response artifact
+    - be -> s3: generate presigned PUT URL
+    - s3 -> be: signed URL
+    - be -> s: upload_url + artifact_id
+    - s -> s3: PUT bytes(webm audio)
+    - s3 -> s: return 200
+    - s -> be: POST /artifact/{aid}/update
+    - be -> pq: update artifact metadata
+    - be -> s: return 200
+  - phase 4: 
+    - s -> be: POST attempt/{aid}/submit
+    - be -> pq: transform attempt.status
+    - pq -> q: enqueue socre_response * N
+    - pq -> q: enqueue finalise_attempt_if_ready
+    - be -> s: return 200; grading started
+  - phase 5: grading parallel
+    - task 1|2|3
+      - q -> pq: load response + rubric
+      - q -> llm: build prompt + request score
+      - llm -> q: criterion band + model_response
+      - q -> pq: insert score_run + score_detail
+    - task 4
+      - q -> s3: download request
+      - s3 -> q: audio file
+      - q -> asr: request audio to text
+      - asr -> q: text + word timing
+      - q -> pq: store task_response.asr_metadata
+      - q -> llm: build prompt + request score
+      - llm -> q: criterion band + model_response
+      - q -> pq: insert score_run + score_detail
+    - phase 6: finalise attempt
+      - q -> pq: check all score_run completed/failed
+      - q -> pq: aggregate competence profile
+      - q -> pq: insert attempt_result, transform attempt status
+    - phase 7: student poll for result
+      - s -> be: GET /attempt/{aid}/result
+      - alt: result not ready
+        - be -> s: result not ready
+      - else
+        - be -> pq: load attempt_result
+        - be -> s: full report(attempt_result, overall_cefr_level)
 ### 学生端
 
 ## 页面总体设计
@@ -289,15 +375,15 @@ GET /api/v1/score-run-list
 - rubric 页面
   - 查看 rubric
   - 创建 rubric
-    - 添加关联的 criteria
-    - 添加 criteria 的 band
+    - 添加关联的 criterion
+    - 添加 criterion 的 band
   - 编辑 rubric
     - 添加关联的 rubric
     - 添加 rubric 的 band
-- criteria 页面
-  - 查看 criteria
-  - 创建 criteria
-  - 编辑 criteria
+- criterion 页面
+  - 查看 criterion
+  - 创建 criterion
+  - 编辑 criterion
 - 人工评分页面
   - attempt 列表
   - attempt 细节 + task 对应的 rubric
