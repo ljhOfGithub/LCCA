@@ -291,9 +291,7 @@ GET /api/v1/score-run-list
 
 ## 系统交互图
 
-```mermaid
-
-```
+![20260426-210756](image/my_plan/20260426-210756.png)
 
 - 主体：
 student - s
@@ -366,7 +364,6 @@ asr service - asr
       - else
         - be -> pq: load attempt_result
         - be -> s: full report(attempt_result, overall_cefr_level)
-### 学生端
 
 ## 页面总体设计
 
@@ -417,4 +414,63 @@ asr service - asr
 - competence 矩阵浏览
 - profile 个人中心
 
-## 页面细节设计
+## scenario 页面细节设计
+### 学生端
+
+#### scenario 列表页面
+- API
+GET /api/v1/available-scenario-list
+- layout
+  - 一张卡片一个 scenario
+  每个 scenario 显示目标 cefr 等级，耗费时长等 metadata
+#### scenario runner 页面
+- layout
+  - 左侧是 task 的进度条，显示标题和状态，当前任务高亮，已完成的打勾，未完成的显示灰色
+  - 顶部是 scenario name + 当前 task + 倒计时（practice 模式显示为0）
+  - 主内容区根据 task type 显示不同的组件
+  - 底部操作栏左侧是上一题，右侧是提交本任务按钮，提交后出现确认弹窗
+  - task1 阅读 + 笔记
+    - 左半屏是 BrightWave 公司广告全文，可滚动
+    - 右半屏是笔记区，上面是 "3-5 个 qualities"输入区，下面"3 个 responsibilities"输入区
+  - task2 写求职信
+    - 左半屏是只读的"参考资料"标签——Tab 1 是 Task 1 的笔记，Tab 2 是 Job Ad 全文（可滚动）
+    - 右半屏是富文本编辑器，支持段落/换行，下面有字数统计
+  - task3 听讲座 + 笔记
+    - 上半屏是音频播放器，不允许暂停/拉进度/速度切换
+    - 下半屏是笔记区，vision 输入区，additional qualities 输入区
+  - task4 面试录音
+    - 上半屏显示当前问题（4 个问题串行）
+    - 中间一个录音组件：大圆形录音按钮、波形可视化、当前录音时长、最大 3 分钟提示。
+    - 下半屏左侧显示"参考你的笔记"面板
+- detail
+  - autosave
+  每30秒触发一次 /attempts/{aid}/tasks/{tid}/response 自动保存
+  - 倒计时到 0 自动提交当前 task 并跳下一个
+
+#### submit confirm 页面
+- layout
+  - finished task list 
+  - task detail
+  - confirm button
+- API
+POST /attempts/{id}/submit
+
+#### result waiting 页面
+- layout
+Task 1 笔记       ✓ 已评分
+Task 2 求职信     ⟳ 评分中（LLM 调用）
+Task 3 听力笔记   ⟳ 排队中
+Task 4 面试       ⟳ 转写中（ASR 处理）
+- API
+GET /attempts/{aid}/result 返回 409 则刷新进度条，返回 200 则跳到 Result 页。
+
+#### result 页面
+- layout
+  - cefr level
+  - domain * competence
+  - task 
+    - overall_band
+    - criterion_band
+    - rationale(AI)
+- API
+GET /attempts/{id}/result
