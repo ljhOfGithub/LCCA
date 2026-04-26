@@ -1,0 +1,27 @@
+# 可选场景列表（基于学生当前等级做个性化推荐）
+GET    /api/v1/me/available-scenarios?mode=practice
+
+# 开始一次尝试
+POST   /api/v1/attempts
+       body: { scenario_id, mode: "practice"|"formal" }
+       返回: { attempt_id, tasks: [...], expires_at }
+
+# 获取某个 task 的完整数据（包含 asset 的签名 URL）
+GET    /api/v1/attempts/{aid}/tasks/{tid}
+
+# 保存中间作答（每 30 秒自动保存）
+PUT    /api/v1/attempts/{aid}/tasks/{tid}/response
+       body: { response_content: {...} }
+
+# 上传录音/笔记图片
+POST   /api/v1/attempts/{aid}/tasks/{tid}/artifacts:upload-url
+       返回预签名上传 URL
+
+# 提交单个 task（锁定）
+POST   /api/v1/attempts/{aid}/tasks/{tid}:submit
+
+# 提交整个 attempt（触发评分）
+POST   /api/v1/attempts/{aid}:submit
+
+# 查看结果（released 之后才返回）
+GET    /api/v1/attempts/{aid}/result

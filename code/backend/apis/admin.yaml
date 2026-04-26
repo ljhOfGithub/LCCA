@@ -1,0 +1,4 @@
+GET    /api/v1/admin/reports/cohorts/{id}/competency-distribution
+GET    /api/v1/admin/reports/scenarios/{id}/task-analytics  
+POST   /api/v1/admin/calibration-runs           人机评分一致性分析
+GET    /api/v1/admin/audit-events?entity=scenario&id=...

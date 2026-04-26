@@ -1,0 +1,4 @@
+POST   /api/v1/auth/sso/callback               PolyU SSO 回调
+GET    /api/v1/me                              当前用户信息
+GET    /api/v1/competency-matrix                获取完整矩阵（带 descriptor）
+GET    /api/v1/competency-matrix/versions       历史版本列表

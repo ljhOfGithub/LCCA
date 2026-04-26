@@ -1,0 +1,20 @@
+# 场景 CRUD
+POST   /api/v1/scenarios                       创建场景草稿
+GET    /api/v1/scenarios                       列表 + 过滤(level, language, status)
+GET    /api/v1/scenarios/{id}
+PATCH  /api/v1/scenarios/{id}                  编辑（只 draft 可以）
+POST   /api/v1/scenarios/{id}:publish          发布（生成版本号 + 冻结）
+POST   /api/v1/scenarios/{id}:clone            克隆为新草稿
+
+# 任务
+POST   /api/v1/scenarios/{id}/tasks
+PATCH  /api/v1/tasks/{id}
+POST   /api/v1/tasks/{id}/assets                上传音频/图片（返回 upload URL）
+POST   /api/v1/tasks/{id}:preview               生成预览（学生视角）
+
+# 评分标准
+POST   /api/v1/rubrics
+GET    /api/v1/rubrics?criterion_code=...
+POST   /api/v1/rubrics/{id}/criteria
+POST   /api/v1/rubrics/{id}:publish
+POST   /api/v1/tasks/{id}/rubric-bindings       关联 rubric 到 task
