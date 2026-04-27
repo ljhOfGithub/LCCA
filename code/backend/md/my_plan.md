@@ -1,4 +1,4 @@
-## 实体
+## t实体
 
 ### 核心能力实体
 
@@ -453,7 +453,7 @@ GET /api/v1/score-run-list
 - score run
   ![1777271339818](image/my_plan/1777271339818.png)
 - scenario/task/rubric/prompt_template(demo hardcode)
-  ![1777271366738](image/my_plan/1777271366738.png)
+  ![1777272627701](image/my_plan/1777272627701.png)
 
 ### system interaction
 
