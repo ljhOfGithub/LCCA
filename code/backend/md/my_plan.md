@@ -78,12 +78,12 @@
   - 编码 {ScenarioName_TaskNumber_TaskName}
   - name
   - version
-  - is_available
+  - status
 - 评分细则 rubric_criterion
   - rubric_id
   - 编码
   - title
-  - 描述
+  - description_i18n(jsonb)
   - domain_id
   - competence_id
 - rubric_band_descriptor 评分描述（字段包含中文描述、英文描述）
@@ -96,19 +96,19 @@
 ### 场景实体
 
 - 场景 scenario
-  - 编码
-  - 语言
-  - is_available
-  - 描述
+  - 编码 code
+  - 语言 lang
+  - status
+  - description_i18n(jsonb)
   - cefr_target_level
   - version
 - 场景任务 task
   - scenario_id
-  - 顺序
-  - description
+  - sequence
+  - description_i18n(jsonb)
   - time_limit(milliseconds)
   - task_type(number)
-  - instruction
+  - instruction_i18n(jsonb)
   - input_payload(jsonb)
   - response_schema(jsonb)
   - config(jsonb)
@@ -135,7 +135,7 @@
   - output_schema
   - recommended_model
   - recommended_temperature
-  - description
+  - description_i18n(jsonb)
   - status
   - created_by(user id)
   - published_at
@@ -160,7 +160,7 @@ name、description、metadata 是 mutable——可以原地改
   - started_at
   - submitted_at
   - expired_at
-  - status(enum number)
+  - status
   - client_metadata(jsonb)
     - browser
     - network
@@ -191,9 +191,10 @@ name、description、metadata 是 mutable——可以原地改
   - response_id
   - rubric_id
   - rubric_version
-  - status(enum number)
+  - status
   - overall_cefr_level
   - overall_band
+  - prompt_template_id
   - model_name
   - model_temperature
   - model_metadata
@@ -206,7 +207,7 @@ name、description、metadata 是 mutable——可以原地改
   - criterion_id
   - band(1-4)
   - completed_at
-  - status(enum number)
+  - status
   - mapped_cefr_level
 - 最终评分结果 attempt_result
   - aid
@@ -219,13 +220,7 @@ name、description、metadata 是 mutable——可以原地改
     note: overall_cefr_level, overall_band 出现两次，表示初步结果和最终发布结果（人工矫正）
 
 ## 其他机制
-### 多语言
-- 多语言实体 translations
-  - entity_type(competency_domain | scenario)
-  - entity_id
-  - locale(en | zh-hk)
-  - field_name(name | description)
-  - field_value
+
 ### 评分重试机制
 等待并完成
 - 成功路径
@@ -325,82 +320,6 @@ GET /api/v1/score-run-list
   GET /api/v1/student/{sid}/history
 - 人工评分员获取学生的competence
   GET /api/v1/student/{sid}/competency-profile
-
-## 系统交互图
-
-![20260426-210756](image/my_plan/20260426-210756.png)
-
-- 主体：
-student - s
-fastapi backend - be
-postgresql - pq
-object storage - s3
-redis + arq worker - q
-llm api - llm 
-asr service - asr
-
-- 流程：
-  - 阶段1 start attempt
-    - s -> be: POST  attempt/start
-    - be -> pq: insert attempt + 4 reponse
-    - pq -> be: attempt_id
-    - be -> student: attempt_id + expired_at
-    - student -> be: GET attempt/{aid}
-    - be -> pq: load scenario + task + material
-    - pq -> s3: presigned URL for materials
-    - s3 -> be: presigned URLs
-    - be -> s: full scenario + task list
-  - phase2: text task(1 2 3) autosave(loop)
-    - s -> be: POST /attempt/{aid}/task/{tid}/response
-    - be -> pq: update response
-    - pq -> be: return ok
-    - be -> s: auto save
-    - s -> be: POST /attempt/{aid}/task/{tid}/submit
-    - be -> pq: transform response status
-    - be -> s: return ok
-  - phase3: task4 audio upload
-    - s -> be: POST /attempt/{aid}/task/{tid}/artifact/upload
-    - be -> pq: generate key + insert response artifact
-    - be -> s3: generate presigned PUT URL
-    - s3 -> be: signed URL
-    - be -> s: upload_url + artifact_id
-    - s -> s3: PUT bytes(webm audio)
-    - s3 -> s: return 200
-    - s -> be: POST /artifact/{aid}/update
-    - be -> pq: update artifact metadata
-    - be -> s: return 200
-  - phase 4: 
-    - s -> be: POST attempt/{aid}/submit
-    - be -> pq: transform attempt.status
-    - pq -> q: enqueue socre_response * N
-    - pq -> q: enqueue finalise_attempt_if_ready
-    - be -> s: return 200; grading started
-  - phase 5: grading parallel
-    - task 1|2|3
-      - q -> pq: load response + rubric
-      - q -> llm: build prompt + request score
-      - llm -> q: criterion band + model_response
-      - q -> pq: insert score_run + score_detail
-    - task 4
-      - q -> s3: download request
-      - s3 -> q: audio file
-      - q -> asr: request audio to text
-      - asr -> q: text + word timing
-      - q -> pq: store task_response.derived_analysis
-      - q -> llm: build prompt + request score
-      - llm -> q: criterion band + model_response
-      - q -> pq: insert score_run + score_detail
-    - phase 6: finalise attempt
-      - q -> pq: check all score_run completed/failed
-      - q -> pq: aggregate competence profile
-      - q -> pq: insert attempt_result, transform attempt status
-    - phase 7: student poll for result
-      - s -> be: GET /attempt/{aid}/result
-      - alt: result not ready
-        - be -> s: result not ready
-      - else
-        - be -> pq: load attempt_result
-        - be -> s: full report(attempt_result, overall_cefr_level)
 
 ## 页面总体设计
 
@@ -513,11 +432,95 @@ GET /attempts/{aid}/result 返回 409 则刷新进度条，返回 200 则跳到 
 - API
 GET /attempts/{id}/result
 
-### 框架图
-![1777216731954](image/my_plan/1777216731954.png)
+### 状态机
+- attempt
+![1777271286927](image/my_plan/1777271286927.png)
 
-### 模拟流程图
-![1777216755570](image/my_plan/1777216755570.png)
+- task response
+![1777271305767](image/my_plan/1777271305767.png)
 
-### 系统架构图
-![1777216782838](image/my_plan/1777216782838.png)
+- response artifact
+![1777271321792](image/my_plan/1777271321792.png)
+
+- score run
+![1777271339818](image/my_plan/1777271339818.png)
+
+- scenario/task/rubric/prompt_template(demo hardcode)
+![1777271366738](image/my_plan/1777271366738.png)
+
+
+### 系统交互图
+
+![20260426-210756](image/my_plan/20260426-210756.png)
+
+- 主体：
+student - s
+fastapi backend - be
+postgresql - pq
+object storage - s3
+redis + arq worker - q
+llm api - llm 
+asr service - asr
+
+- 流程：
+  - 阶段1 start attempt
+    - s -> be: POST  attempt/start
+    - be -> pq: insert attempt + 4 reponse
+    - pq -> be: attempt_id
+    - be -> student: attempt_id + expired_at
+    - student -> be: GET attempt/{aid}
+    - be -> pq: load scenario + task + material
+    - pq -> s3: presigned URL for materials
+    - s3 -> be: presigned URLs
+    - be -> s: full scenario + task list
+  - phase2: text task(1 2 3) autosave(loop)
+    - s -> be: POST /attempt/{aid}/task/{tid}/response
+    - be -> pq: update response
+    - pq -> be: return ok
+    - be -> s: auto save
+    - s -> be: POST /attempt/{aid}/task/{tid}/submit
+    - be -> pq: transform response status
+    - be -> s: return ok
+  - phase3: task4 audio upload
+    - s -> be: POST /attempt/{aid}/task/{tid}/artifact/upload
+    - be -> pq: generate key + insert response artifact
+    - be -> s3: generate presigned PUT URL
+    - s3 -> be: signed URL
+    - be -> s: upload_url + artifact_id
+    - s -> s3: PUT bytes(webm audio)
+    - s3 -> s: return 200
+    - s -> be: POST /artifact/{aid}/update
+    - be -> pq: update artifact metadata
+    - be -> s: return 200
+  - phase 4: 
+    - s -> be: POST attempt/{aid}/submit
+    - be -> pq: transform attempt.status
+    - pq -> q: enqueue socre_response * N
+    - pq -> q: enqueue finalise_attempt_if_ready
+    - be -> s: return 200; grading started
+  - phase 5: grading parallel
+    - task 1|2|3
+      - q -> pq: load response + rubric
+      - q -> llm: build prompt + request score
+      - llm -> q: criterion band + model_response
+      - q -> pq: insert score_run + score_detail
+    - task 4
+      - q -> s3: download request
+      - s3 -> q: audio file
+      - q -> asr: request audio to text
+      - asr -> q: text + word timing
+      - q -> pq: store task_response.derived_analysis
+      - q -> llm: build prompt + request score
+      - llm -> q: criterion band + model_response
+      - q -> pq: insert score_run + score_detail
+    - phase 6: finalise attempt
+      - q -> pq: check all score_run completed/failed
+      - q -> pq: aggregate competence profile
+      - q -> pq: insert attempt_result, transform attempt status
+    - phase 7: student poll for result
+      - s -> be: GET /attempt/{aid}/result
+      - alt: result not ready
+        - be -> s: result not ready
+      - else
+        - be -> pq: load attempt_result
+        - be -> s: full report(attempt_result, overall_cefr_level)
