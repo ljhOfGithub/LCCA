@@ -242,33 +242,33 @@ name、description、metadata 是 mutable——可以原地改
 
 ## API 设计
 
-### 评分标准 rubric API
+### 评分标准 rubric API(demo hardcode)
 
 GET /api/v1/rubric-list
 POST /api/v1/rubric/create
 POST /api/v1/rubric/{id}/edit
 GET /api/v1/rubric/{id}
 
-### 评分标准细则 criterion API
+### 评分标准细则 criterion API(demo hardcode)
 
 POST /api/v1/rubric/criterion/create
 POST /api/v1/rubric/criterion/{id}/edit
 
-### 场景实体 scenario API
+### 场景实体 scenario API(demo hardcode)
 
 GET /api/v1/scenario-list
 POST /api/v1/scanario/create
 POST /api/v1/scenario/{id}/edit
 GET /api/v1/scenario/{id}
 
-### 场景任务实体 task API
+### 场景任务实体 task API(demo hardcode)
 
 GET /api/v1/task-list
 POST /api/v1/task/create
 POST /api/v1/task/{id}/edit
 GET /api/v1/task/{id}
 
-### 材料 material API
+### 材料 material API(demo hardcode)
 
 GET /api/v1/material-list
 POST /api/v1/material/create
@@ -323,7 +323,7 @@ GET /api/v1/score-run-list
 
 ## 页面总体设计
 
-### 老师端（demo 阶段不做，hardcode）
+### 老师端（demo hardcode）
 
 - rubric 页面
   - 查看 rubric
@@ -370,16 +370,16 @@ GET /api/v1/score-run-list
 - competence 矩阵浏览
 - profile 个人中心
 
-## scenario 页面细节设计
+## scenario page detail design
 ### 学生端
 
-#### scenario 列表页面
+#### scenario list page
 - API
 GET /api/v1/available-scenario-list
 - layout
   - 一张卡片一个 scenario
   每个 scenario 显示目标 cefr 等级，耗费时长等 metadata
-#### scenario runner 页面
+#### scenario runner page
 - layout
   - 左侧是 task 的进度条，显示标题和状态，当前任务高亮，已完成的打勾，未完成的显示灰色
   - 顶部是 scenario name + 当前 task + 倒计时（practice 模式显示为0）
@@ -432,7 +432,7 @@ GET /attempts/{aid}/result 返回 409 则刷新进度条，返回 200 则跳到 
 - API
 GET /attempts/{id}/result
 
-### 状态机
+### state machine
 - attempt
 ![1777271286927](image/my_plan/1777271286927.png)
 
@@ -449,7 +449,7 @@ GET /attempts/{id}/result
 ![1777271366738](image/my_plan/1777271366738.png)
 
 
-### 系统交互图
+### system interaction
 
 ![20260426-210756](image/my_plan/20260426-210756.png)
 
