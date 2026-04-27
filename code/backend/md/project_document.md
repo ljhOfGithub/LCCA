@@ -1,4 +1,4 @@
-## t实体
+## 实体
 
 ### 核心能力实体
 
@@ -43,34 +43,49 @@
 
 - 反馈
 - 作弊检测记录
+- 审计日志
 
 ## 实体属性
+
+### 用户实体
+- user
+  - external_id(polyu SSO ID)
+  - role
+  - status
+  - account
+  - password_hash(debug dev)
+- student 
+  - student_number
+  - user_id
+- teacher
+  - user_id
+  - staff_number
 
 ### 核心能力实体
 
 - Social-interpersonal等评分领域 domain/aspect
   - 编码
-  - 名字
-  - 描述
+  - name_i18n(jsonb)
+  - description_i18n(jsonb)
   - 是否启用
 - Linguistic等评分能力 competence
   - 编码
-  - 名字
-  - 描述
+  - name_i18n(jsonb)
+  - description_i18n(jsonb)
   - 是否启用
 - cefr语言评分等级 level
-  - 名字
-  - 描述
+  - name_i18n(jsonb)
+  - description_i18n(jsonb)
   - 是否启用
   - 顺序
 - competence matrix 矩阵单元格
   - domain
   - competence
   - cefr
-  - description
+  - description_i18n(jsonb)
   - 是否启用
-  - 版本
-  - 来源（自订还是全球标准）
+  - 版本 version
+  - 来源（自订还是全球标准） source
 
 ### 评分标准实体
 
@@ -89,8 +104,8 @@
 - rubric_band_descriptor 评分描述（字段包含中文描述、英文描述）
   - rubric_creteria_id
   - 等级band（1-4）
-  - description_ai
-  - description_human
+  - description_ai(jsonb)
+  - description_human(jsonb)
   - cefr_level_id
 
 ### 场景实体
@@ -123,6 +138,10 @@
   - metadata
   - version(upload again)
   - task_id
+- 场景材料关联表 task_material
+  - task_id
+  - material_id
+  - purpose
 - 提示词模板 prompt_template
   - 编码
   - version
@@ -162,6 +181,8 @@
   - submitted_at
   - expired_at
   - status
+  - resume_count
+  - last_resumed_at
   - client_metadata(jsonb)
     - browser
     - network
@@ -175,6 +196,7 @@
   - expired_at
   - response_payload
   - derived_analysis(asr_metadata 是其中一种情况)
+    - asr_metadata
   - status(enum nubmer)
 - 单个作答产生的文件 response_artifact
   - response_id
@@ -185,6 +207,7 @@
   - checksum
   - duration(budget management)
   - committed_at
+  - status
 
 ### 评分结果实体
 
@@ -193,8 +216,8 @@
   - rubric_id
   - rubric_version
   - status
-  - overall_cefr_level
-  - overall_band
+  - ai_cefr_level
+  - ai_band
   - prompt_template_id
   - model_name
   - model_temperature
@@ -208,17 +231,39 @@
   - criterion_id
   - band(1-4)
   - completed_at
-  - status
   - mapped_cefr_level
 - 最终评分结果 attempt_result
   - aid
-  - score_run_id
+  - score_run_id_list
+  - ai_cefr_level
+  - ai_band
   - overall_cefr_level
   - overall_band
+  - is_human_adjusted
+  - adjusted_by_user_id
+  - adjusted_at
+  - adjustment_reason
   - pass_fail
   - competence_profile(jsonb)
   - generated_at
-    note: overall_cefr_level, overall_band 出现两次，表示初步结果和最终发布结果（人工矫正）
+  - released_at
+  - status(draft | released | challenged | revised)
+
+### 反馈模块实体
+- audit_event
+  - actor_user_id
+  - entity_type
+  - entity_id
+  - action(created | updated | published)
+  - before(jsonb)
+  - after(jsonb)
+  - context(jsonb) IP, reason
+- proctoring_event
+  - attempt_id
+  - event_type(focus_loss | tab_switch | multi_face | no_face | abnormal_audio | network_drop | resume)
+  - occurred_at
+  - payload (jsonb)
+  - risk_score(0-1)
 
 ## 其他机制
 
@@ -245,6 +290,13 @@
 
 ## API 设计
 
+### 用户 API(demo skip)f
+POST /api/v1/login
+POST /api/v1/logout
+GET /api/v1/profile
+POST /api/v1/password/reset
+POST /api/v1/password/forget
+
 ### 评分标准 rubric API(demo hardcode)
 
 GET /api/v1/rubric-list
@@ -260,7 +312,7 @@ POST /api/v1/rubric/criterion/{id}/edit
 ### 场景实体 scenario API(demo hardcode)
 
 GET /api/v1/scenario-list
-POST /api/v1/scanario/create
+POST /api/v1/scenario/create
 POST /api/v1/scenario/{id}/edit
 GET /api/v1/scenario/{id}
 
@@ -353,12 +405,12 @@ GET /api/v1/score-run-list
 
 ### 学生端
 
-- dashboard
+- dashboard(demo skip)
   - 历史 attempt
-- scenario 列表
+- scenario 列表(demo skip)
   - 练习|正式模式切换
   - 只包含 scenario 4
-- preflight 页面
+- preflight 页面(demo skip)
   - 设备检测
   - 协议同意
 - scenario 任务页面
@@ -369,9 +421,9 @@ GET /api/v1/score-run-list
 - result 报告页
   - cefr
   - domain * competence
-- attempt 历史页面
+- attempt 历史页面(demo skip)
 - competence 矩阵浏览
-- profile 个人中心
+- profile 个人中心(demo skip)
 
 ## scenario page detail design
 
