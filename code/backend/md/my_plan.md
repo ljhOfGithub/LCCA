@@ -10,7 +10,7 @@
 ### 评分标准实体
 
 - 评分体系 rubric
-- 评分细则 rubric_criteria
+- 评分细则 rubric_criterion
 - 评分描述（字段包含中文描述、英文描述）rubric_band_descriptor
 
 ### 场景实体
@@ -30,15 +30,12 @@
 ### 评分结果实体
 
 - 单个评分（使用rater type区分人工和AI）
-- 单个评分中，对应单个评分标准criteria的细节
+- 单个评分中，对应单个评分标准criterion的细节
 - 最终评分结果
 
 ### 角色权限控制系统实体
 
 - 用户
-- 角色
-- 用户角色关联表
-- 许可
 - 学生
 - 老师
 
@@ -82,7 +79,7 @@
   - name
   - version
   - is_available
-- 评分细则 rubric_criteria
+- 评分细则 rubric_criterion
   - rubric_id
   - 编码
   - title
@@ -100,7 +97,7 @@
 
 - 场景 scenario
   - 编码
-  - t语言
+  - 语言
   - is_available
   - 描述
   - cefr_target_level
@@ -108,14 +105,14 @@
 - 场景任务 task
   - scenario_id
   - 顺序
-  - ti
+  - description
   - time_limit(milliseconds)
   - task_type(number)
   - instruction
   - input_payload(jsonb)
   - response_schema(jsonb)
   - config(jsonb)
-  - version
+  - version(替换 material 时，task 也要跟着升版本)
 - 材料（资源） material
   - name
   - material_type(including prompt)
@@ -124,14 +121,35 @@
   - duration_ms
   - transcript
   - metadata
-- 任务对应材料的关联表 task_material
-  - tid
-  - material_id
+  - version(upload again)
+  - task_id
+- 提示词模板 prompt_template
+  - 编码
+  - version
+  - template_type
+  - target_task_type(scoring | followup_question | feedback_generation)
+  - target_language(reading | writing)
+  - system_prompt
+  - user_prompt(involving variable)
+  - variables
+  - output_schema
+  - recommended_model
+  - recommended_temperature
+  - description
+  - status
+  - created_by(user id)
+  - published_at
+  - deprecated_at
 - 任务对应rubric的关联表 task_rubric
   - tid
   - rubric_id
   - weight
-
+note:
+- 教师替换 material → 创建一条新 material 记录（同 code、version+1）
+- 想用新 material → 创建新 task version，关联到新 material_id
+- 老的 attempt 引用的 task_version 还指向老 task → 老 task 还指向老 material → 历史完全可追溯
+- material 的 storage_key、size_bytes、checksum、duration_ms 是 immutable——一旦 published，永远不能改
+name、description、metadata 是 mutable——可以原地改
 ### 考试会话实体
 
 - 单次考试尝试 attempt
@@ -155,33 +173,37 @@
   - submitted_at
   - expired_at
   - response_payload
-  - asr_metadata
+  - derived_analysis(asr_metadata 是其中一种情况)
   - status(enum nubmer)
 - 单个作答产生的文件 response_artifact
   - response_id
   - artifact_type
   - storage_key
   - mime_type
+  - size_bytes(check for student account storage)
+  - checksum
+  - duration(budget management)
+  - committed_at
 
 ### 评分结果实体
 
-- 单个评分 score_run（使用rater type区分人工和AI）
+- 单个评分 score_run（使用rater type区分人工和AI，粒度是 task 级别）
   - response_id
   - rubric_id
   - rubric_version
   - status(enum number)
   - overall_cefr_level
   - overall_band
-  - completed_at
-- 单个评分中，对应单个评分标准criteria的细节 score_detail
-  - score_run_id
-  - criteria_id
   - model_name
   - model_temperature
   - model_metadata
   - model_response
   - rater_type
   - rater_id
+  - completed_at
+- 单个评分中，对应单个评分标准criterion的细节 score_detail
+  - score_run_id
+  - criterion_id
   - band(1-4)
   - completed_at
   - status(enum number)
@@ -198,13 +220,24 @@
 
 ## 其他机制
 ### 多语言
-- 多语言文件
+- 多语言实体 translations
+  - entity_type(competency_domain | scenario)
+  - entity_id
+  - locale(en | zh-hk)
+  - field_name(name | description)
+  - field_value
 ### 评分重试机制
 等待并完成
 - 成功路径
 所有 task 都成功
 - 超时兜底
 保证不会无限等待，从提交 attempt 开始评分起，超时十分钟则放弃，并且全部使用人工重评
+- 瞬时失败
+  - 网络抖动
+  - Invalid API Key
+  - Rate Limit
+  - Service Unavailable
+使用 arq 的 retry 机制，重试大概率成功 
 - 重试次数
 累计检查 N 次还没成功就放弃
 - 提前完成
@@ -253,6 +286,10 @@ GET /api/v1/material/{id}
   GET /api/v1/available-scenario-list
 - 学生开始作答
   POST /api/v1/attempt/start
+- 学生查看未提交的 attempt
+  GET /api/v1/attempt/active
+- 学生恢复未完成的 attempt 
+  GET /api/v1/attempts/{aid}/resume
 - 学生获取作答细节
   GET /api/v1/attempt/{aid}/task/{tid}
 - 自动保存学生中间回答
@@ -349,7 +386,7 @@ asr service - asr
       - s3 -> q: audio file
       - q -> asr: request audio to text
       - asr -> q: text + word timing
-      - q -> pq: store task_response.asr_metadata
+      - q -> pq: store task_response.derived_analysis
       - q -> llm: build prompt + request score
       - llm -> q: criterion band + model_response
       - q -> pq: insert score_run + score_detail
@@ -436,7 +473,7 @@ GET /api/v1/available-scenario-list
     - 左半屏是只读的"参考资料"标签——Tab 1 是 Task 1 的笔记，Tab 2 是 Job Ad 全文（可滚动）
     - 右半屏是富文本编辑器，支持段落/换行，下面有字数统计
   - task3 听讲座 + 笔记
-    - 上半屏是音频播放器，不允许暂停/拉进度/速度切换
+    - 上半屏是音频播放器，不允许暂停/拉进度/速度切换，允许 1 次完整重听
     - 下半屏是笔记区，vision 输入区，additional qualities 输入区
   - task4 面试录音
     - 上半屏显示当前问题（4 个问题串行）
@@ -453,6 +490,7 @@ GET /api/v1/available-scenario-list
   - task detail
   - confirm button
 - API
+GET /attempts/{aid}/summary
 POST /attempts/{id}/submit
 
 #### result waiting 页面
@@ -474,3 +512,12 @@ GET /attempts/{aid}/result 返回 409 则刷新进度条，返回 200 则跳到 
     - rationale(AI)
 - API
 GET /attempts/{id}/result
+
+### 框架图
+![1777216731954](image/my_plan/1777216731954.png)
+
+### 模拟流程图
+![1777216755570](image/my_plan/1777216755570.png)
+
+### 系统架构图
+![1777216782838](image/my_plan/1777216782838.png)
