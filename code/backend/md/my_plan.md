@@ -144,12 +144,13 @@
   - tid
   - rubric_id
   - weight
-note:
+    note:
 - 教师替换 material → 创建一条新 material 记录（同 code、version+1）
 - 想用新 material → 创建新 task version，关联到新 material_id
 - 老的 attempt 引用的 task_version 还指向老 task → 老 task 还指向老 material → 历史完全可追溯
 - material 的 storage_key、size_bytes、checksum、duration_ms 是 immutable——一旦 published，永远不能改
-name、description、metadata 是 mutable——可以原地改
+  name、description、metadata 是 mutable——可以原地改
+
 ### 考试会话实体
 
 - 单次考试尝试 attempt
@@ -222,23 +223,25 @@ name、description、metadata 是 mutable——可以原地改
 ## 其他机制
 
 ### 评分重试机制
+
 等待并完成
+
 - 成功路径
-所有 task 都成功
+  所有 task 都成功
 - 超时兜底
-保证不会无限等待，从提交 attempt 开始评分起，超时十分钟则放弃，并且全部使用人工重评
+  保证不会无限等待，从提交 attempt 开始评分起，超时十分钟则放弃，并且全部使用人工重评
 - 瞬时失败
   - 网络抖动
   - Invalid API Key
   - Rate Limit
   - Service Unavailable
-使用 arq 的 retry 机制，重试大概率成功 
+    使用 arq 的 retry 机制，重试大概率成功
 - 重试次数
-累计检查 N 次还没成功就放弃
+  累计检查 N 次还没成功就放弃
 - 提前完成
-如果所有的评分 score run 都进入终态，completed 或者 failed，则不再等待，将 failed 的部分使用人工重评
+  如果所有的评分 score run 都进入终态，completed 或者 failed，则不再等待，将 failed 的部分使用人工重评
 - 网络兜底
-如果每个 score run 都完成，但是出现网络故障，导致无法 finalize attempt，则 finalise_attempt_if_ready 负责兜底
+  如果每个 score run 都完成，但是出现网络故障，导致无法 finalize attempt，则 finalise_attempt_if_ready 负责兜底
 
 ## API 设计
 
@@ -283,7 +286,7 @@ GET /api/v1/material/{id}
   POST /api/v1/attempt/start
 - 学生查看未提交的 attempt
   GET /api/v1/attempt/active
-- 学生恢复未完成的 attempt 
+- 学生恢复未完成的 attempt
   GET /api/v1/attempts/{aid}/resume
 - 学生获取作答细节
   GET /api/v1/attempt/{aid}/task/{tid}
@@ -371,15 +374,19 @@ GET /api/v1/score-run-list
 - profile 个人中心
 
 ## scenario page detail design
+
 ### 学生端
 
 #### scenario list page
+
 - API
-GET /api/v1/available-scenario-list
+  GET /api/v1/available-scenario-list
 - layout
   - 一张卡片一个 scenario
-  每个 scenario 显示目标 cefr 等级，耗费时长等 metadata
+    每个 scenario 显示目标 cefr 等级，耗费时长等 metadata
+
 #### scenario runner page
+
 - layout
   - 左侧是 task 的进度条，显示标题和状态，当前任务高亮，已完成的打勾，未完成的显示灰色
   - 顶部是 scenario name + 当前 task + 倒计时（practice 模式显示为0）
@@ -400,69 +407,68 @@ GET /api/v1/available-scenario-list
     - 下半屏左侧显示"参考你的笔记"面板
 - detail
   - autosave
-  每30秒触发一次 /attempts/{aid}/tasks/{tid}/response 自动保存
+    每30秒触发一次 /attempts/{aid}/tasks/{tid}/response 自动保存
   - 倒计时到 0 自动提交当前 task 并跳下一个
 
 #### submit confirm 页面
+
 - layout
-  - finished task list 
+  - finished task list
   - task detail
   - confirm button
 - API
-GET /attempts/{aid}/summary
-POST /attempts/{id}/submit
+  GET /attempts/{aid}/summary
+  POST /attempts/{id}/submit
 
 #### result waiting 页面
+
 - layout
-Task 1 笔记       ✓ 已评分
-Task 2 求职信     ⟳ 评分中（LLM 调用）
-Task 3 听力笔记   ⟳ 排队中
-Task 4 面试       ⟳ 转写中（ASR 处理）
+  Task 1 笔记       ✓ 已评分
+  Task 2 求职信     ⟳ 评分中（LLM 调用）
+  Task 3 听力笔记   ⟳ 排队中
+  Task 4 面试       ⟳ 转写中（ASR 处理）
 - API
-GET /attempts/{aid}/result 返回 409 则刷新进度条，返回 200 则跳到 Result 页。
+  GET /attempts/{aid}/result 返回 409 则刷新进度条，返回 200 则跳到 Result 页。
 
 #### result 页面
+
 - layout
   - cefr level
   - domain * competence
-  - task 
+  - task
     - overall_band
     - criterion_band
     - rationale(AI)
 - API
-GET /attempts/{id}/result
+  GET /attempts/{id}/result
 
 ### state machine
+
 - attempt
-![1777271286927](image/my_plan/1777271286927.png)
-
+  ![1777271286927](image/my_plan/1777271286927.png)
 - task response
-![1777271305767](image/my_plan/1777271305767.png)
-
+  ![1777271305767](image/my_plan/1777271305767.png)
 - response artifact
-![1777271321792](image/my_plan/1777271321792.png)
-
+  ![1777271321792](image/my_plan/1777271321792.png)
 - score run
-![1777271339818](image/my_plan/1777271339818.png)
-
+  ![1777271339818](image/my_plan/1777271339818.png)
 - scenario/task/rubric/prompt_template(demo hardcode)
-![1777271366738](image/my_plan/1777271366738.png)
-
+  ![1777271366738](image/my_plan/1777271366738.png)
 
 ### system interaction
 
 ![20260426-210756](image/my_plan/20260426-210756.png)
 
 - 主体：
-student - s
-fastapi backend - be
-postgresql - pq
-object storage - s3
-redis + arq worker - q
-llm api - llm 
-asr service - asr
-
+  student - s
+  fastapi backend - be
+  postgresql - pq
+  object storage - s3
+  redis + arq worker - q
+  llm api - llm
+  asr service - asr
 - 流程：
+
   - 阶段1 start attempt
     - s -> be: POST  attempt/start
     - be -> pq: insert attempt + 4 reponse
@@ -492,7 +498,7 @@ asr service - asr
     - s -> be: POST /artifact/{aid}/update
     - be -> pq: update artifact metadata
     - be -> s: return 200
-  - phase 4: 
+  - phase 4:
     - s -> be: POST attempt/{aid}/submit
     - be -> pq: transform attempt.status
     - pq -> q: enqueue socre_response * N
