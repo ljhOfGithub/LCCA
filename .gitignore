@@ -1,0 +1,8 @@
+*
+!*/
+node_modules
+!*.yaml
+!*.sql
+!code/**/*.md
+!daily/**/*.md
+!.gitignore
