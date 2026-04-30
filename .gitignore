@@ -5,4 +5,5 @@ node_modules
 !*.sql
 !code/**/*.md
 !daily/**/*.md
+!code/**/*.png
 !.gitignore
