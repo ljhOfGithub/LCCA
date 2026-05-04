@@ -12,7 +12,7 @@ State machine integration:
 - Events: start, submit, cancel, score_complete
 - Direct status field modifications are prohibited
 """
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 from datetime import datetime, timezone
 

@@ -35,7 +35,7 @@ export default function ScenarioList() {
     setError(null)
     try {
       const response = await scenarioApi.list({ status: 'published' })
-      setScenarios(response.data.items)
+      setScenarios(response.data.items || response.data)
     } catch (err: any) {
       console.error('Failed to load scenarios:', err)
       setError(err.response?.data?.message || 'Failed to load scenarios. Please try again.')

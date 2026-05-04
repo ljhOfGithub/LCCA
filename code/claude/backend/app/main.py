@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.api.v1 import attempts, auth, scoring, health, timeout as timeout_routes, results
 from app.api.v1.admin import scenarios as admin_scenarios
 from app.api.v1.teacher import rubrics, scenarios as teacher_scenarios, tasks
-from app.api.v1.student import scenarios as student_scenarios
+from app.api.v1.student_api import scenarios as student_scenarios
 from app.api.v1.rater import human
 
 

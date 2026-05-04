@@ -9,6 +9,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.db.session import get_session
@@ -48,7 +49,11 @@ async def get_current_user(
         raise credentials_exception
 
     from app.models.user import User
-    result = await session.execute(select(User).where(User.id == user_id))
+    result = await session.execute(
+        select(User)
+        .options(selectinload(User.teacher), selectinload(User.student))
+        .where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -76,27 +81,50 @@ async def get_current_user_optional(
 
 def require_role(allowed_roles: list[UserRole]):
     """Dependency to require specific roles."""
-    async def role_checker(current_user: "User" = Depends(get_current_user)) -> "User":
-        # Get user's role
-        from app.models.user import Student, Teacher
+    async def role_checker(
+        token: str = Depends(oauth2_scheme),
+    ) -> "User":
+        """Check role from JWT payload, verify user exists separately."""
+        payload = verify_token(token)
+        if payload is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-        role = get_user_role(current_user)
+        role_str = payload.get("role")
+        if role_str is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing role",
+            )
 
+        role = UserRole(role_str)
         if role not in allowed_roles:
-            # Admin has all permissions
-            if UserRole.ADMIN not in allowed_roles:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access denied. Required roles: {[r.value for r in allowed_roles]}",
-                )
-            # Check if admin role is required and user is admin
-            if role != UserRole.ADMIN:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access denied. Required roles: {[r.value for r in allowed_roles]}",
-                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required roles: {[r.value for r in allowed_roles]}",
+            )
 
-        return current_user
+        # Still need to return a User object for downstream dependencies
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            )
+
+        from app.models.user import User
+        async with AsyncSession() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            if user is None or not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found or inactive",
+                )
+            return user
 
     return role_checker
 
@@ -118,8 +146,6 @@ def require_admin():
 
 def get_user_role(user: "User") -> UserRole:
     """Determine user's role from their profile."""
-    from app.models.user import Student, Teacher
-
     # Check if user is a teacher
     if user.teacher is not None:
         return UserRole.TEACHER

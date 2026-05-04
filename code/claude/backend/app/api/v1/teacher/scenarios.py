@@ -104,6 +104,43 @@ async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
     return teacher
 
 
+@router.get("/published", response_model=List[ScenarioResponse])
+async def list_published_scenarios(
+    session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
+    """List all published scenarios for any authenticated user."""
+    result = await session.execute(
+        select(Scenario)
+        .options(selectinload(Scenario.tasks))
+        .where(Scenario.status == ScenarioStatus.PUBLISHED.value)
+        .order_by(Scenario.created_at.desc())
+    )
+    scenarios = result.scalars().all()
+    return [
+        ScenarioResponse(
+            id=str(s.id),
+            title=s.title,
+            description=s.description,
+            status=s.status,
+            created_by_id=str(s.created_by_id),
+            tasks=[
+                TaskResponse(
+                    id=str(t.id),
+                    scenario_id=str(t.scenario_id),
+                    title=t.title,
+                    description=t.description,
+                    task_type=t.task_type,
+                    sequence_order=t.sequence_order,
+                    time_limit_seconds=t.time_limit_seconds,
+                )
+                for t in sorted(s.tasks, key=lambda x: x.sequence_order)
+            ],
+        )
+        for s in scenarios
+    ]
+
+
 @router.get("/scenarios", response_model=List[ScenarioResponse])
 async def list_scenarios(
     session: AsyncSession = Depends(get_session),
@@ -176,11 +213,9 @@ async def create_scenario(
 async def get_scenario(
     scenario_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a specific scenario by ID."""
-    teacher = await get_teacher_profile(current_user, session)
-
     result = await session.execute(
         select(Scenario)
         .options(selectinload(Scenario.tasks))
@@ -190,12 +225,6 @@ async def get_scenario(
 
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-
-    if scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to view this scenario",
-        )
 
     return ScenarioResponse(
         id=str(scenario.id),

@@ -59,23 +59,23 @@ export const authApi = {
 export const scenarioApi = {
   // 获取场景列表
   list: (params?: { page?: number; per_page?: number; status?: string }) =>
-    apiClient.get('/scenarios', { params }),
+    apiClient.get('/teacher/published', { params }),
 
   // 获取单个场景详情（含tasks）
   get: (scenarioId: string) =>
-    apiClient.get(`/scenarios/${scenarioId}`),
+    apiClient.get(`/teacher/scenarios/${scenarioId}`),
 
   // 获取场景任务列表
   getTasks: (scenarioId: string) =>
-    apiClient.get(`/scenarios/${scenarioId}/tasks`),
+    apiClient.get(`/teacher/scenarios/${scenarioId}/tasks`),
 
   // 获取任务详情（含prompt）
   getTask: (scenarioId: string, taskIndex: number) =>
-    apiClient.get(`/scenarios/${scenarioId}/tasks/${taskIndex}`),
+    apiClient.get(`/teacher/scenarios/${scenarioId}/tasks/${taskIndex}`),
 
   // 获取任务prompt内容
   getTaskPrompt: (scenarioId: string, taskIndex: number) =>
-    apiClient.get(`/scenarios/${scenarioId}/tasks/${taskIndex}/prompt`),
+    apiClient.get(`/teacher/scenarios/${scenarioId}/tasks/${taskIndex}/prompt`),
 }
 
 // ============ Attempt APIs ============
