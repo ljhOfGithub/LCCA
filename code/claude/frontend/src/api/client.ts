@@ -50,8 +50,7 @@ export const authApi = {
   logout: () =>
     apiClient.post('/auth/logout'),
 
-  me: () =>
-    apiClient.get('/users/me'),
+  me: () => apiClient.get('/me'),
 }
 
 // ============ Scenario APIs ============
@@ -138,7 +137,7 @@ export const taskResponseApi = {
 
 export const userApi = {
   // 获取当前用户信息
-  me: () => apiClient.get('/users/me'),
+  me: () => apiClient.get('/me'),
 
   // 获取用户统计
   stats: () => apiClient.get('/users/me/stats'),

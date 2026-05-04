@@ -9,9 +9,11 @@ interface Task3ListeningProps {
   audioDuration: number // in seconds
   timeLimit: number // in seconds
   initialNotes?: string
+  initialTimeRemaining?: number
   onSubmit: (notes: string, audioReplayCount: number) => Promise<void>
   onComplete: () => void
   onNotesChange?: (notes: string) => void
+  onTimerPause?: (remainingSeconds: number) => void
   disabled?: boolean
 }
 
@@ -22,9 +24,11 @@ export default function Task3Listening({
   audioDuration,
   timeLimit,
   initialNotes = '',
+  initialTimeRemaining,
   onSubmit,
   onComplete,
   onNotesChange,
+  onTimerPause,
   disabled = false,
 }: Task3ListeningProps) {
   const [notes, setNotes] = useState(initialNotes)
@@ -36,10 +40,18 @@ export default function Task3Listening({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [hasUsedReplay, setHasUsedReplay] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(timeLimit)
+  const [timeRemaining, setTimeRemaining] = useState(Math.floor(initialTimeRemaining ?? timeLimit))
+  const timeRemainingRef = useRef(Math.floor(initialTimeRemaining ?? timeLimit))
+  const onTimerPauseRef = useRef(onTimerPause)
+  useEffect(() => { onTimerPauseRef.current = onTimerPause }, [onTimerPause])
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const countDownRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Save remaining time on unmount so parent can resume correctly
+  useEffect(() => {
+    return () => { onTimerPauseRef.current?.(timeRemainingRef.current) }
+  }, [])
 
   // Countdown timer
   useEffect(() => {
@@ -47,11 +59,10 @@ export default function Task3Listening({
 
     countDownRef.current = setInterval(() => {
       setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          handleSubmit()
-          return 0
-        }
-        return prev - 1
+        const next = prev <= 1 ? 0 : prev - 1
+        timeRemainingRef.current = next
+        if (next === 0) handleSubmit()
+        return next
       })
     }, 1000)
 

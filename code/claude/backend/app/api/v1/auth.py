@@ -164,15 +164,12 @@ async def register(
     )
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """Get current user profile."""
+def _build_user_response(current_user: User) -> UserResponse:
     role = "admin"
     if current_user.teacher is not None:
         role = "teacher"
     elif current_user.student is not None:
         role = "student"
-
     return UserResponse(
         id=str(current_user.id),
         email=current_user.email,
@@ -181,6 +178,18 @@ async def get_me(current_user: User = Depends(get_current_user)):
         is_superuser=current_user.is_superuser,
         role=role,
     )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Get current user profile."""
+    return _build_user_response(current_user)
+
+
+@router.get("/users/me", response_model=UserResponse)
+async def get_me_alias(current_user: User = Depends(get_current_user)):
+    """Alias for /me — kept for backwards compatibility."""
+    return _build_user_response(current_user)
 
 
 @router.post("/change-password")

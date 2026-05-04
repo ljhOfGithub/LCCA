@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { scenarioApi } from '../api/client'
+import { Link, useNavigate } from 'react-router-dom'
+import { scenarioApi, authApi } from '../api/client'
+import TeacherDashboard from './TeacherDashboard'
 import type { Scenario } from '../types'
 
 const statusConfig = {
@@ -22,11 +23,24 @@ const statusConfig = {
 }
 
 export default function ScenarioList() {
+  const navigate = useNavigate()
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const [userName, setUserName] = useState('')
 
   useEffect(() => {
+    // Fetch user role first, redirect to login if not authenticated
+    authApi.me().then(r => {
+      setUserRole(r.data.role)
+      setUserName(r.data.full_name || r.data.email)
+    }).catch((err: any) => {
+      // Only redirect to login for authentication errors, not other failures
+      if (err?.response?.status === 401 || !localStorage.getItem('access_token')) {
+        navigate('/login')
+      }
+    })
     loadScenarios()
   }, [])
 
@@ -55,6 +69,16 @@ export default function ScenarioList() {
     return `${minutes}m`
   }
 
+  // Show teacher dashboard for teacher/admin roles
+  if (userRole === 'teacher' || userRole === 'admin') {
+    return <TeacherDashboard userName={userName} />
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token')
+    navigate('/login')
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -68,10 +92,14 @@ export default function ScenarioList() {
               </p>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500">Welcome, Student</span>
-              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium">
-                S
+              <span className="text-sm text-gray-500">{userName || 'Student'}</span>
+              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium text-sm">
+                {(userName || 'S')[0].toUpperCase()}
               </div>
+              <button onClick={handleLogout}
+                className="text-sm text-gray-500 hover:text-gray-700 border border-gray-300 px-3 py-1 rounded-lg">
+                Logout
+              </button>
             </div>
           </div>
         </div>

@@ -17,9 +17,12 @@ interface Task2WritingProps {
   taskId: string
   taskIndex: number
   initialContent?: string
+  timeLimit?: number
+  initialTimeRemaining?: number
   onSubmit?: () => void
   saveResponse: (taskIndex: number, content: string) => void
   onContentChange?: (content: string) => void
+  onTimerPause?: (remaining: number) => void
 }
 
 export default function Task2Writing({
@@ -27,9 +30,12 @@ export default function Task2Writing({
   wordLimit = { min: 150, max: 300 },
   taskIndex,
   initialContent = '',
+  timeLimit,
+  initialTimeRemaining,
   onSubmit,
   saveResponse,
   onContentChange,
+  onTimerPause,
 }: Task2WritingProps) {
   const [response, setResponse] = useState(initialContent)
 
@@ -39,8 +45,38 @@ export default function Task2Writing({
   const [activeTab, setActiveTab] = useState<ReferenceTab>('resume')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(
+    initialTimeRemaining != null ? Math.floor(initialTimeRemaining)
+    : timeLimit != null ? timeLimit
+    : null
+  )
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const countdownRef = useRef<NodeJS.Timeout | null>(null)
+
+  const onSubmitRef = useRef<(() => void) | undefined>(onSubmit)
+  useEffect(() => { onSubmitRef.current = onSubmit }, [onSubmit])
+
+  const timeRemainingRef = useRef(timeRemaining ?? 0)
+  const onTimerPauseRef = useRef(onTimerPause)
+  useEffect(() => { onTimerPauseRef.current = onTimerPause }, [onTimerPause])
+  useEffect(() => () => { if (timeRemainingRef.current > 0) onTimerPauseRef.current?.(timeRemainingRef.current) }, [])
+
+  useEffect(() => {
+    if (timeRemaining === null) return
+    countdownRef.current = setInterval(() => {
+      setTimeRemaining((prev) => {
+        const next = prev === null || prev <= 1 ? 0 : prev - 1
+        timeRemainingRef.current = next
+        if (next === 0) onSubmitRef.current?.()
+        return next
+      })
+    }, 1000)
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
+  }, [])
+
+  const formatTime = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
   // Auto-save every 30 seconds
   useEffect(() => {
@@ -110,6 +146,13 @@ export default function Task2Writing({
             Write a cover letter based on the reference materials
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          {timeRemaining !== null && (
+            <div className={`px-3 py-1.5 rounded-lg flex items-center gap-1 text-sm font-mono font-bold
+              ${timeRemaining <= 60 ? 'bg-red-100 text-red-600 border border-red-300' : 'bg-gray-100 text-gray-700'}`}>
+              ⏱ {formatTime(timeRemaining)}
+            </div>
+          )}
         <div className="flex items-center gap-2 text-sm">
           {isSaving ? (
             <span className="text-blue-600 flex items-center gap-1">
@@ -130,6 +173,7 @@ export default function Task2Writing({
           >
             Save Now
           </button>
+        </div>
         </div>
       </div>
 

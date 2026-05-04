@@ -9,6 +9,13 @@ import Task4Speaking from './tasks/Task4Speaking'
 import { scenarioApi, attemptApi } from '../api/client'
 import { useCountdown } from '../hooks/useCountdown'
 
+interface Material {
+  id: string
+  material_type: string
+  content: string | null
+  storage_key: string | null
+}
+
 interface Task {
   id: string
   scenario_id: string
@@ -17,6 +24,7 @@ interface Task {
   task_type: 'reading' | 'writing' | 'listening' | 'speaking'
   sequence_order: number
   time_limit_seconds: number | null
+  materials: Material[]
 }
 
 interface SpeakingQuestion {
@@ -24,6 +32,20 @@ interface SpeakingQuestion {
   order: number
   question: string
   timeLimitSeconds: number
+}
+
+const S3_BASE = 'http://localhost:9000/lcca-artifacts'
+
+function getMaterial(task: Task, type: string): Material | undefined {
+  return task.materials?.find((m) => m.material_type === type)
+}
+
+function getAudioUrl(task: Task): string {
+  const m = getMaterial(task, 'audio')
+  if (!m) return ''
+  if (m.content) return m.content
+  if (m.storage_key) return `${S3_BASE}/${m.storage_key}`
+  return ''
 }
 
 export default function ScenarioRunner() {
@@ -37,6 +59,8 @@ export default function ScenarioRunner() {
   const [taskResponseIds, setTaskResponseIds] = useState<Record<number, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<number, string>>({})
   const [taskContents, setTaskContents] = useState<Record<number, string>>({})
+  const [taskStartMs, setTaskStartMs] = useState<Record<number, number>>({}) // unix ms when task became active
+  const [taskPausedRemaining, setTaskPausedRemaining] = useState<Record<number, number>>({}) // saved remaining seconds on pause
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -97,14 +121,20 @@ export default function ScenarioRunner() {
       })
       setTaskStatuses(initialStatuses)
 
-      // Start attempt
-      await attemptApi.start(aid)
+      // Start attempt — if already submitted, the status comes back as 'submitted'
+      const startRes = await attemptApi.start(aid)
+      if (startRes.data.status !== 'in_progress') {
+        alert('You have already submitted this exam.')
+        navigate('/')
+        return
+      }
 
       // Load task response IDs from backend
       await loadTaskResponses(aid, rawTasks)
 
-      // Mark first task as in_progress
+      // Mark first task as in_progress and record its start time
       setTaskStatuses((prev) => ({ ...prev, 0: 'in_progress' }))
+      setTaskStartMs((prev) => ({ ...prev, 0: Date.now() }))
 
       start()
     } catch (error) {
@@ -178,7 +208,11 @@ export default function ScenarioRunner() {
       const nextIndex = taskIndex + 1
       if (nextIndex < tasks.length) {
         setTaskStatuses((prev) => ({ ...prev, [nextIndex]: 'in_progress' }))
+        setTaskStartMs((prev) => ({ ...prev, [nextIndex]: Date.now() }))
         setCurrentTaskIndex(nextIndex)
+      } else {
+        // All tasks done — submit the entire attempt automatically
+        await handleSubmitAll()
       }
     } catch (error) {
       console.error('Failed to submit task:', error)
@@ -205,9 +239,24 @@ export default function ScenarioRunner() {
     }
   }
 
+  const getTimeRemaining = (taskIndex: number): number | undefined => {
+    const task = tasks[taskIndex]
+    if (!task?.time_limit_seconds) return undefined
+    // Use saved paused value if available (takes priority over wall-clock)
+    if (taskPausedRemaining[taskIndex] !== undefined) return taskPausedRemaining[taskIndex]
+    const startMs = taskStartMs[taskIndex]
+    if (!startMs) return task.time_limit_seconds
+    const elapsed = (Date.now() - startMs) / 1000
+    return Math.floor(Math.max(0, task.time_limit_seconds - elapsed))
+  }
+
   const handleTaskClick = (taskId: string) => {
     const taskIndex = tasks.findIndex((t) => t.id === taskId)
     if (taskIndex !== -1 && taskStatuses[taskIndex] !== 'not_started') {
+      // Record start time only if first time entering this task
+      if (!taskStartMs[taskIndex]) {
+        setTaskStartMs((prev) => ({ ...prev, [taskIndex]: Date.now() }))
+      }
       setCurrentTaskIndex(taskIndex)
     }
   }
@@ -303,16 +352,21 @@ export default function ScenarioRunner() {
             <Task1Reading
               advertisement={{
                 title: currentTask.title,
-                body: currentTask.description || '',
+                body: getMaterial(currentTask, 'advertisement')?.content || currentTask.description || '',
               }}
               attemptId={attemptId!}
               taskId={currentTask.id}
               taskIndex={currentTaskIndex}
               initialContent={taskContents[currentTaskIndex] || ''}
+              timeLimit={currentTask.time_limit_seconds ?? undefined}
+              initialTimeRemaining={getTimeRemaining(currentTaskIndex)}
               onSubmit={() => handleTaskSubmit(currentTaskIndex)}
               saveResponse={saveTaskResponse}
               onContentChange={(content) =>
                 setTaskContents((prev) => ({ ...prev, [currentTaskIndex]: content }))
+              }
+              onTimerPause={(remaining) =>
+                setTaskPausedRemaining((prev) => ({ ...prev, [currentTaskIndex]: remaining }))
               }
             />
           )}
@@ -320,17 +374,24 @@ export default function ScenarioRunner() {
           {currentTask?.task_type === 'writing' && (
             <Task2Writing
               referenceMaterials={{
-                job_description: currentTask.description || '',
+                resume: getMaterial(currentTask, 'resume')?.content || undefined,
+                job_description: getMaterial(currentTask, 'job_description')?.content || currentTask.description || '',
+                notes: getMaterial(currentTask, 'notes')?.content || undefined,
               }}
               wordLimit={{ min: 150, max: 300 }}
               attemptId={attemptId!}
               taskId={currentTask.id}
               taskIndex={currentTaskIndex}
               initialContent={taskContents[currentTaskIndex] || ''}
+              timeLimit={currentTask.time_limit_seconds ?? undefined}
+              initialTimeRemaining={getTimeRemaining(currentTaskIndex)}
               onSubmit={() => handleTaskSubmit(currentTaskIndex)}
               saveResponse={saveTaskResponse}
               onContentChange={(content) =>
                 setTaskContents((prev) => ({ ...prev, [currentTaskIndex]: content }))
+              }
+              onTimerPause={(remaining) =>
+                setTaskPausedRemaining((prev) => ({ ...prev, [currentTaskIndex]: remaining }))
               }
             />
           )}
@@ -345,18 +406,26 @@ export default function ScenarioRunner() {
               <Task3Listening
                 attemptId={attemptId!}
                 taskId={currentTask.id}
-                audioUrl=""
+                audioUrl={getAudioUrl(currentTask)}
                 audioDuration={180}
                 timeLimit={currentTask.time_limit_seconds || 900}
                 initialNotes={listeningNotes}
+                initialTimeRemaining={getTimeRemaining(currentTaskIndex)}
                 onSubmit={async (notes: string, audioReplayCount: number) => {
-                  await saveTaskResponse(currentTaskIndex, JSON.stringify({ notes, audioReplayCount }))
+                  if (notes.trim()) {
+                    await saveTaskResponse(currentTaskIndex, JSON.stringify({ notes, audioReplayCount }))
+                  }
                 }}
-                onNotesChange={(notes) =>
-                  setTaskContents((prev) => ({
-                    ...prev,
-                    [currentTaskIndex]: JSON.stringify({ notes, audioReplayCount: 0 }),
-                  }))
+                onNotesChange={(notes) => {
+                  if (notes.trim()) {
+                    setTaskContents((prev) => ({
+                      ...prev,
+                      [currentTaskIndex]: JSON.stringify({ notes, audioReplayCount: 0 }),
+                    }))
+                  }
+                }}
+                onTimerPause={(remaining) =>
+                  setTaskPausedRemaining((prev) => ({ ...prev, [currentTaskIndex]: remaining }))
                 }
                 onComplete={() => handleTaskSubmit(currentTaskIndex)}
                 disabled={false}

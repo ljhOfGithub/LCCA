@@ -9,18 +9,24 @@ interface Task1ReadingProps {
   taskId: string
   taskIndex: number
   initialContent?: string
+  timeLimit?: number
+  initialTimeRemaining?: number
   onSubmit?: () => void
   saveResponse: (taskIndex: number, content: string) => void
   onContentChange?: (content: string) => void
+  onTimerPause?: (remaining: number) => void
 }
 
 export default function Task1Reading({
   advertisement,
   taskIndex,
   initialContent = '',
+  timeLimit,
+  initialTimeRemaining,
   onSubmit,
   saveResponse,
   onContentChange,
+  onTimerPause,
 }: Task1ReadingProps) {
   const [notes, setNotes] = useState(initialContent)
 
@@ -29,8 +35,42 @@ export default function Task1Reading({
   }, [initialContent])
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(
+    initialTimeRemaining != null ? Math.floor(initialTimeRemaining)
+    : timeLimit != null ? timeLimit
+    : null
+  )
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const countdownRef = useRef<NodeJS.Timeout | null>(null)
+
+  const handleSubmitRef = useRef<(() => void) | undefined>(onSubmit)
+  useEffect(() => { handleSubmitRef.current = onSubmit }, [onSubmit])
+
+  const timeRemainingRef = useRef(timeRemaining ?? 0)
+  const onTimerPauseRef = useRef(onTimerPause)
+  useEffect(() => { onTimerPauseRef.current = onTimerPause }, [onTimerPause])
+  useEffect(() => () => { if (timeRemainingRef.current > 0) onTimerPauseRef.current?.(timeRemainingRef.current) }, [])
+
+  // Countdown timer
+  useEffect(() => {
+    if (timeRemaining === null) return
+    countdownRef.current = setInterval(() => {
+      setTimeRemaining((prev) => {
+        const next = prev === null || prev <= 1 ? 0 : prev - 1
+        timeRemainingRef.current = next
+        if (next === 0) handleSubmitRef.current?.()
+        return next
+      })
+    }, 1000)
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
+  }, [])
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
 
   // Auto-save every 30 seconds
   useEffect(() => {
@@ -94,6 +134,13 @@ export default function Task1Reading({
             Read the advertisement and take notes in the right panel
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          {timeRemaining !== null && (
+            <div className={`px-3 py-1.5 rounded-lg flex items-center gap-2 text-sm font-mono font-bold
+              ${timeRemaining <= 60 ? 'bg-red-100 text-red-600 border border-red-300' : 'bg-gray-100 text-gray-700'}`}>
+              ⏱ {formatTime(timeRemaining)}
+            </div>
+          )}
         <div className="flex items-center gap-2 text-sm">
           {isSaving ? (
             <span className="text-blue-600 flex items-center gap-1">
@@ -114,6 +161,7 @@ export default function Task1Reading({
           >
             Save Now
           </button>
+        </div>
         </div>
       </div>
 

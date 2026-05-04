@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o"
 
+    # Anthropic Claude API
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-6"
+
     # ASR API
     asr_api_key: str = ""
     asr_api_url: str = "https://api.example.com/asr"

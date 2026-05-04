@@ -2,7 +2,7 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -213,6 +213,75 @@ async def delete_task(
 
 
 # Material endpoints
+
+@router.post("/tasks/{task_id}/materials/upload-audio", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
+async def upload_audio_material(
+    task_id: UUID,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_teacher()),
+):
+    """Upload an audio file (MP3/WAV/WebM) and attach it as a material to a task."""
+    from app.core.config import settings
+    import boto3, uuid as uuid_lib, asyncio, os
+
+    teacher = await get_teacher_profile(current_user, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session)
+
+    # Accept any audio content type
+    allowed_types = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/webm", "audio/ogg", "audio/mp4"}
+    if file.content_type and file.content_type.split(";")[0] not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Unsupported audio type: {file.content_type}")
+
+    ext = (file.filename or "audio").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else "mp3"
+    storage_key = f"materials/{task_id}/{uuid_lib.uuid4()}.{ext}"
+    content = await file.read()
+
+    def do_upload():
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+        )
+        s3.put_object(Bucket=settings.s3_bucket, Key=storage_key, Body=content,
+                      ContentType=file.content_type or "audio/mpeg")
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, do_upload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Storage upload failed: {e}")
+
+    # Remove existing audio material if any
+    existing_result = await session.execute(
+        select(Material).where(Material.task_id == task_id, Material.material_type == "audio")
+    )
+    for old in existing_result.scalars().all():
+        await session.delete(old)
+
+    public_endpoint = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
+    public_url = f"{public_endpoint}/{settings.s3_bucket}/{storage_key}"
+
+    material = Material(
+        task_id=task.id,
+        material_type="audio",
+        content=public_url,
+        storage_key=storage_key,
+    )
+    session.add(material)
+    await session.commit()
+
+    return MaterialResponse(
+        id=str(material.id),
+        task_id=str(material.task_id),
+        material_type=material.material_type,
+        content=material.content,
+        storage_key=material.storage_key,
+        metadata_json=material.metadata_json,
+    )
+
 
 @router.post("/tasks/{task_id}/materials", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
 async def add_material(

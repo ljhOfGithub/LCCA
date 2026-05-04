@@ -11,13 +11,31 @@ from sqlalchemy.orm import selectinload
 from app.core.security import get_current_user, require_teacher
 from app.core.status import ScenarioStatus, TaskType
 from app.db.session import get_session
-from app.models.scenario import Scenario, Task
+from app.models.scenario import Material, Scenario, Task
 from app.models.user import Teacher, User
 
 router = APIRouter()
 
 
 # Pydantic schemas
+
+class MaterialResponse(BaseModel):
+    id: str
+    task_id: str
+    material_type: str
+    content: str | None
+    storage_key: str | None
+    metadata_json: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class MaterialCreate(BaseModel):
+    material_type: str = Field(..., min_length=1, max_length=50)
+    content: str | None = None
+    storage_key: str | None = None
+    metadata_json: str | None = None
+
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -43,24 +61,7 @@ class TaskResponse(BaseModel):
     task_type: TaskType
     sequence_order: int
     time_limit_seconds: int | None
-
-    model_config = {"from_attributes": True}
-
-
-class MaterialCreate(BaseModel):
-    material_type: str = Field(..., min_length=1, max_length=50)
-    content: str | None = None
-    storage_key: str | None = None
-    metadata_json: str | None = None
-
-
-class MaterialResponse(BaseModel):
-    id: str
-    task_id: str
-    material_type: str
-    content: str | None
-    storage_key: str | None
-    metadata_json: str | None
+    materials: List[MaterialResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -88,19 +89,50 @@ class ScenarioResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
-    """Get teacher's profile, raising 403 if not found."""
-    result = await session.execute(
-        select(Teacher).where(Teacher.user_id == user.id)
+# Helpers
+
+def _task_response(t: Task) -> TaskResponse:
+    return TaskResponse(
+        id=str(t.id),
+        scenario_id=str(t.scenario_id),
+        title=t.title,
+        description=t.description,
+        task_type=t.task_type,
+        sequence_order=t.sequence_order,
+        time_limit_seconds=t.time_limit_seconds,
+        materials=[
+            MaterialResponse(
+                id=str(m.id),
+                task_id=str(m.task_id),
+                material_type=m.material_type,
+                content=m.content,
+                storage_key=m.storage_key,
+                metadata_json=m.metadata_json,
+            )
+            for m in (t.materials or [])
+        ],
     )
+
+
+def _scenario_response(s: Scenario) -> ScenarioResponse:
+    return ScenarioResponse(
+        id=str(s.id),
+        title=s.title,
+        description=s.description,
+        status=s.status,
+        created_by_id=str(s.created_by_id),
+        tasks=[_task_response(t) for t in sorted(s.tasks, key=lambda x: x.sequence_order)],
+    )
+
+
+_TASKS_WITH_MATERIALS = selectinload(Scenario.tasks).selectinload(Task.materials)
+
+
+async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
+    result = await session.execute(select(Teacher).where(Teacher.user_id == user.id))
     teacher = result.scalar_one_or_none()
-
     if not teacher:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not a teacher",
-        )
-
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a teacher")
     return teacher
 
 
@@ -112,33 +144,11 @@ async def list_published_scenarios(
     """List all published scenarios for any authenticated user."""
     result = await session.execute(
         select(Scenario)
-        .options(selectinload(Scenario.tasks))
+        .options(_TASKS_WITH_MATERIALS)
         .where(Scenario.status == ScenarioStatus.PUBLISHED.value)
         .order_by(Scenario.created_at.desc())
     )
-    scenarios = result.scalars().all()
-    return [
-        ScenarioResponse(
-            id=str(s.id),
-            title=s.title,
-            description=s.description,
-            status=s.status,
-            created_by_id=str(s.created_by_id),
-            tasks=[
-                TaskResponse(
-                    id=str(t.id),
-                    scenario_id=str(t.scenario_id),
-                    title=t.title,
-                    description=t.description,
-                    task_type=t.task_type,
-                    sequence_order=t.sequence_order,
-                    time_limit_seconds=t.time_limit_seconds,
-                )
-                for t in sorted(s.tasks, key=lambda x: x.sequence_order)
-            ],
-        )
-        for s in scenarios
-    ]
+    return [_scenario_response(s) for s in result.scalars().all()]
 
 
 @router.get("/scenarios", response_model=List[ScenarioResponse])
@@ -148,37 +158,13 @@ async def list_scenarios(
 ):
     """List all scenarios created by the current teacher."""
     teacher = await get_teacher_profile(current_user, session)
-
     result = await session.execute(
         select(Scenario)
-        .options(selectinload(Scenario.tasks))
+        .options(_TASKS_WITH_MATERIALS)
         .where(Scenario.created_by_id == teacher.id)
         .order_by(Scenario.created_at.desc())
     )
-    scenarios = result.scalars().all()
-
-    return [
-        ScenarioResponse(
-            id=str(s.id),
-            title=s.title,
-            description=s.description,
-            status=s.status,
-            created_by_id=str(s.created_by_id),
-            tasks=[
-                TaskResponse(
-                    id=str(t.id),
-                    scenario_id=str(t.scenario_id),
-                    title=t.title,
-                    description=t.description,
-                    task_type=t.task_type,
-                    sequence_order=t.sequence_order,
-                    time_limit_seconds=t.time_limit_seconds,
-                )
-                for t in sorted(s.tasks, key=lambda x: x.sequence_order)
-            ],
-        )
-        for s in scenarios
-    ]
+    return [_scenario_response(s) for s in result.scalars().all()]
 
 
 @router.post("/scenarios", response_model=ScenarioResponse, status_code=status.HTTP_201_CREATED)
@@ -189,7 +175,6 @@ async def create_scenario(
 ):
     """Create a new scenario."""
     teacher = await get_teacher_profile(current_user, session)
-
     scenario = Scenario(
         title=scenario_data.title,
         description=scenario_data.description,
@@ -198,7 +183,6 @@ async def create_scenario(
     )
     session.add(scenario)
     await session.commit()
-
     return ScenarioResponse(
         id=str(scenario.id),
         title=scenario.title,
@@ -218,33 +202,13 @@ async def get_scenario(
     """Get a specific scenario by ID."""
     result = await session.execute(
         select(Scenario)
-        .options(selectinload(Scenario.tasks))
+        .options(_TASKS_WITH_MATERIALS)
         .where(Scenario.id == scenario_id)
     )
     scenario = result.scalar_one_or_none()
-
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-
-    return ScenarioResponse(
-        id=str(scenario.id),
-        title=scenario.title,
-        description=scenario.description,
-        status=scenario.status,
-        created_by_id=str(scenario.created_by_id),
-        tasks=[
-            TaskResponse(
-                id=str(t.id),
-                scenario_id=str(t.scenario_id),
-                title=t.title,
-                description=t.description,
-                task_type=t.task_type,
-                sequence_order=t.sequence_order,
-                time_limit_seconds=t.time_limit_seconds,
-            )
-            for t in sorted(scenario.tasks, key=lambda x: x.sequence_order)
-        ],
-    )
+    return _scenario_response(scenario)
 
 
 @router.put("/scenarios/{scenario_id}", response_model=ScenarioResponse)
@@ -256,29 +220,23 @@ async def update_scenario(
 ):
     """Update a scenario."""
     teacher = await get_teacher_profile(current_user, session)
-
     result = await session.execute(
         select(Scenario)
-        .options(selectinload(Scenario.tasks))
+        .options(_TASKS_WITH_MATERIALS)
         .where(Scenario.id == scenario_id)
     )
     scenario = result.scalar_one_or_none()
-
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-
     if scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to update this scenario",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have permission to update this scenario")
 
     if scenario_data.title is not None:
         scenario.title = scenario_data.title
     if scenario_data.description is not None:
         scenario.description = scenario_data.description
     if scenario_data.status is not None:
-        # Validate status transition
         if not scenario.status.can_transition_to(scenario_data.status):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -287,26 +245,7 @@ async def update_scenario(
         scenario.status = scenario_data.status
 
     await session.commit()
-
-    return ScenarioResponse(
-        id=str(scenario.id),
-        title=scenario.title,
-        description=scenario.description,
-        status=scenario.status,
-        created_by_id=str(scenario.created_by_id),
-        tasks=[
-            TaskResponse(
-                id=str(t.id),
-                scenario_id=str(t.scenario_id),
-                title=t.title,
-                description=t.description,
-                task_type=t.task_type,
-                sequence_order=t.sequence_order,
-                time_limit_seconds=t.time_limit_seconds,
-            )
-            for t in sorted(scenario.tasks, key=lambda x: x.sequence_order)
-        ],
-    )
+    return _scenario_response(scenario)
 
 
 @router.delete("/scenarios/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -317,28 +256,16 @@ async def delete_scenario(
 ):
     """Delete a scenario and all its tasks."""
     teacher = await get_teacher_profile(current_user, session)
-
-    result = await session.execute(
-        select(Scenario).where(Scenario.id == scenario_id)
-    )
+    result = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     scenario = result.scalar_one_or_none()
-
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-
     if scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this scenario",
-        )
-
-    # Check if scenario has any attempts
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have permission to delete this scenario")
     if scenario.attempts:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete scenario with existing attempts",
-        )
-
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Cannot delete scenario with existing attempts")
     await session.delete(scenario)
     await session.commit()
 
@@ -352,22 +279,11 @@ async def list_tasks(
     """List all tasks for a scenario."""
     result = await session.execute(
         select(Task)
+        .options(selectinload(Task.materials))
         .where(Task.scenario_id == scenario_id)
         .order_by(Task.sequence_order)
     )
-    tasks = result.scalars().all()
-    return [
-        TaskResponse(
-            id=str(t.id),
-            scenario_id=str(t.scenario_id),
-            title=t.title,
-            description=t.description,
-            task_type=t.task_type,
-            sequence_order=t.sequence_order,
-            time_limit_seconds=t.time_limit_seconds,
-        )
-        for t in tasks
-    ]
+    return [_task_response(t) for t in result.scalars().all()]
 
 
 @router.get("/scenarios/{scenario_id}/tasks/{task_index}", response_model=TaskResponse)
@@ -380,25 +296,16 @@ async def get_task_by_index(
     """Get a task by its 0-based index (sequence order position)."""
     result = await session.execute(
         select(Task)
+        .options(selectinload(Task.materials))
         .where(Task.scenario_id == scenario_id)
         .order_by(Task.sequence_order)
         .offset(task_index)
         .limit(1)
     )
     task = result.scalar_one_or_none()
-
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    return TaskResponse(
-        id=str(task.id),
-        scenario_id=str(task.scenario_id),
-        title=task.title,
-        description=task.description,
-        task_type=task.task_type,
-        sequence_order=task.sequence_order,
-        time_limit_seconds=task.time_limit_seconds,
-    )
+    return _task_response(task)
 
 
 @router.post("/scenarios/{scenario_id}/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -410,26 +317,16 @@ async def add_task(
 ):
     """Add a new task to a scenario."""
     teacher = await get_teacher_profile(current_user, session)
-
-    result = await session.execute(
-        select(Scenario).where(Scenario.id == scenario_id)
-    )
+    result = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     scenario = result.scalar_one_or_none()
-
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-
     if scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to add tasks to this scenario",
-        )
-
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have permission to add tasks to this scenario")
     if scenario.status != ScenarioStatus.DRAFT:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only add tasks to draft scenarios",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Can only add tasks to draft scenarios")
 
     task = Task(
         scenario_id=scenario.id,
@@ -441,13 +338,6 @@ async def add_task(
     )
     session.add(task)
     await session.commit()
-
-    return TaskResponse(
-        id=str(task.id),
-        scenario_id=str(task.scenario_id),
-        title=task.title,
-        description=task.description,
-        task_type=task.task_type,
-        sequence_order=task.sequence_order,
-        time_limit_seconds=task.time_limit_seconds,
-    )
+    await session.refresh(task)
+    task.materials = []
+    return _task_response(task)

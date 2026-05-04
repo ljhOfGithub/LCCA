@@ -33,7 +33,9 @@ export default function RichTextEditor({
       Placeholder.configure({
         placeholder,
       }),
-      CharacterCount,
+      CharacterCount.configure({
+        wordCounter: (text) => text.split(/\s+/).filter((w) => w !== '').length,
+      }),
     ],
     content,
     editable: !disabled,
@@ -47,7 +49,12 @@ export default function RichTextEditor({
   }
 
   const characterCount = editor.storage.characterCount.characters()
-  const wordCount = editor.storage.characterCount.words()
+  // Compute word count directly from ProseMirror doc to avoid TipTap CharacterCount quirks
+  const wordCount = editor.state.doc
+    .textBetween(0, editor.state.doc.content.size, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length
 
   const isOverLimit = wordLimit ? wordCount > wordLimit.max : false
   const isUnderLimit = wordLimit ? wordCount < wordLimit.min : false
