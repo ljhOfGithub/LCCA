@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, ForeignKey, Enum as SAEnum, DateTime
+from sqlalchemy import String, Text, ForeignKey, Enum as SAEnum, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,6 +58,7 @@ class TaskResponse(Base, UUIDMixin, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     attempt: Mapped["Attempt"] = relationship("Attempt", back_populates="task_responses")
     task: Mapped["Task"] = relationship("Task")

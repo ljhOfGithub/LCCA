@@ -71,11 +71,11 @@ export const scenarioApi = {
 
   // 获取任务详情（含prompt）
   getTask: (scenarioId: string, taskIndex: number) =>
-    apiClient.get(`/teacher/scenarios/${scenarioId}/tasks/${taskIndex}`),
+    apiClient.get(`/scenarios/${scenarioId}/tasks/${taskIndex}`),
 
   // 获取任务prompt内容
   getTaskPrompt: (scenarioId: string, taskIndex: number) =>
-    apiClient.get(`/teacher/scenarios/${scenarioId}/tasks/${taskIndex}/prompt`),
+    apiClient.get(`/scenarios/${scenarioId}/tasks/${taskIndex}/prompt`),
 }
 
 // ============ Attempt APIs ============

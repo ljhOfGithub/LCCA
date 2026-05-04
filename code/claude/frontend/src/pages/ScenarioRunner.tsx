@@ -8,7 +8,16 @@ import Task3Listening from './tasks/Task3Listening'
 import Task4Speaking from './tasks/Task4Speaking'
 import { scenarioApi, attemptApi } from '../api/client'
 import { useCountdown } from '../hooks/useCountdown'
-import type { Scenario, Task, TaskDetailResponse } from '../types'
+
+interface Task {
+  id: string
+  scenario_id: string
+  title: string
+  description: string | null
+  task_type: 'reading' | 'writing' | 'listening' | 'speaking'
+  sequence_order: number
+  time_limit_seconds: number | null
+}
 
 interface SpeakingQuestion {
   id: string
@@ -21,10 +30,9 @@ export default function ScenarioRunner() {
   const { scenarioId } = useParams<{ scenarioId: string }>()
   const navigate = useNavigate()
 
-  const [scenario, setScenario] = useState<Scenario | null>(null)
+  const [scenarioTitle, setScenarioTitle] = useState<string>('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
-  const [currentTaskDetail, setCurrentTaskDetail] = useState<TaskDetailResponse | null>(null)
   const [attemptId, setAttemptId] = useState<string | null>(null)
   const [taskResponseIds, setTaskResponseIds] = useState<Record<number, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<number, string>>({})
@@ -32,7 +40,8 @@ export default function ScenarioRunner() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const currentTask = tasks[currentTaskIndex]
-  const totalSeconds = (scenario?.duration_minutes || 30) * 60
+  // Default to 90 minutes if not specified
+  const totalSeconds = 90 * 60
 
   const {
     seconds,
@@ -47,47 +56,44 @@ export default function ScenarioRunner() {
     onWarning: (remaining) => {
       console.log('Warning: Time is running out!', remaining)
     },
-    warningThreshold: 300, // 5 minutes
+    warningThreshold: 300,
   })
 
-  // Load scenario and tasks
   useEffect(() => {
     if (scenarioId) {
       loadScenarioData()
     }
   }, [scenarioId])
 
-  // Load task details when current task changes
-  useEffect(() => {
-    if (currentTask && scenarioId) {
-      loadTaskDetails(currentTask.index)
-    }
-  }, [currentTaskIndex])
-
   const loadScenarioData = async () => {
     setIsLoading(true)
     try {
-      // 获取场景详情（含任务列表）
       const scenarioResponse = await scenarioApi.get(scenarioId!)
-      setScenario(scenarioResponse.data)
-      setTasks(scenarioResponse.data.tasks || [])
+      setScenarioTitle(scenarioResponse.data.title || '')
+      const rawTasks: Task[] = scenarioResponse.data.tasks || []
+      setTasks(rawTasks)
 
-      // 创建考试尝试
+      // Create attempt
       const attemptResponse = await attemptApi.create(scenarioId!)
-      setAttemptId(attemptResponse.data.id)
+      const aid = attemptResponse.data.id
+      setAttemptId(aid)
 
-      // 初始化所有任务状态为not_started
+      // Initialize task statuses
       const initialStatuses: Record<number, string> = {}
-      const initialResponseIds: Record<number, string> = {}
-      scenarioResponse.data.tasks?.forEach((_task: Task, index: number) => {
+      rawTasks.forEach((_: Task, index: number) => {
         initialStatuses[index] = 'not_started'
-        initialResponseIds[index] = ''
       })
       setTaskStatuses(initialStatuses)
-      setTaskResponseIds(initialResponseIds)
 
-      // 开始尝试
-      await attemptApi.start(attemptResponse.data.id)
+      // Start attempt
+      await attemptApi.start(aid)
+
+      // Load task response IDs from backend
+      await loadTaskResponses(aid, rawTasks)
+
+      // Mark first task as in_progress
+      setTaskStatuses((prev) => ({ ...prev, 0: 'in_progress' }))
+
       start()
     } catch (error) {
       console.error('Failed to load scenario:', error)
@@ -96,12 +102,27 @@ export default function ScenarioRunner() {
     }
   }
 
-  const loadTaskDetails = async (taskIndex: number) => {
+  const loadTaskResponses = async (aid: string, taskList: Task[]) => {
     try {
-      const response = await scenarioApi.getTask(scenarioId!, taskIndex)
-      setCurrentTaskDetail(response.data)
+      const res = await fetch(`/api/v1/attempts/${aid}/responses`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+      })
+      const data = await res.json()
+      const items: { id: string; task_id: string; status: string }[] = data.items || []
+
+      const newIds: Record<number, string> = {}
+      const newStatuses: Record<number, string> = {}
+      taskList.forEach((task: Task, index: number) => {
+        const found = items.find((r) => r.task_id === task.id)
+        if (found) {
+          newIds[index] = found.id
+          newStatuses[index] = found.status === 'submitted' ? 'completed' : found.status
+        }
+      })
+      setTaskResponseIds((prev) => ({ ...prev, ...newIds }))
+      setTaskStatuses((prev) => ({ ...prev, ...newStatuses }))
     } catch (error) {
-      console.error('Failed to load task details:', error)
+      console.error('Failed to load task responses:', error)
     }
   }
 
@@ -114,7 +135,7 @@ export default function ScenarioRunner() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({ content }),
       })
@@ -128,57 +149,20 @@ export default function ScenarioRunner() {
     if (!responseId || !attemptId) return
 
     try {
-      // 提交任务响应
       await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}/submit`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
       })
 
-      // 更新状态
       setTaskStatuses((prev) => ({ ...prev, [taskIndex]: 'completed' }))
 
-      // 获取下一个任务
       const nextIndex = taskIndex + 1
       if (nextIndex < tasks.length) {
-        // 初始化下一个任务
-        await initializeTask(nextIndex)
+        setTaskStatuses((prev) => ({ ...prev, [nextIndex]: 'in_progress' }))
         setCurrentTaskIndex(nextIndex)
       }
     } catch (error) {
       console.error('Failed to submit task:', error)
-    }
-  }
-
-  const initializeTask = async (taskIndex: number) => {
-    if (!attemptId || !currentTask) return
-
-    try {
-      const response = await fetch(`/api/v1/attempts/${attemptId}/responses`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      const data = await response.json()
-
-      // 找到对应任务的response id
-      const taskResponse = data.items?.find(
-        (r: any) => r.task_id === tasks[taskIndex].id
-      )
-
-      if (taskResponse) {
-        setTaskResponseIds((prev) => ({
-          ...prev,
-          [taskIndex]: taskResponse.id,
-        }))
-        setTaskStatuses((prev) => ({
-          ...prev,
-          [taskIndex]: taskResponse.status === 'submitted' ? 'completed' : 'in_progress',
-        }))
-      }
-    } catch (error) {
-      console.error('Failed to initialize task:', error)
     }
   }
 
@@ -192,7 +176,7 @@ export default function ScenarioRunner() {
     setIsSubmitting(true)
     try {
       await attemptApi.submit(attemptId, true)
-      alert('Time is up! Your answers have been submitted.')
+      alert('Your answers have been submitted.')
       navigate('/')
     } catch (error) {
       console.error('Failed to submit exam:', error)
@@ -212,7 +196,7 @@ export default function ScenarioRunner() {
   const progressTasks = tasks.map((task, index) => ({
     id: task.id,
     title: task.title,
-    type: task.type,
+    type: task.task_type,
     status: (taskStatuses[index] as any) || 'not_started',
   }))
 
@@ -241,7 +225,7 @@ export default function ScenarioRunner() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
             </button>
-            <h1 className="text-lg font-semibold text-gray-900">{scenario?.title}</h1>
+            <h1 className="text-lg font-semibold text-gray-900">{scenarioTitle}</h1>
           </div>
 
           <Timer
@@ -257,7 +241,7 @@ export default function ScenarioRunner() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 flex gap-6">
-        {/* Sidebar - Progress */}
+        {/* Sidebar */}
         <aside className="w-72 flex-shrink-0">
           <ProgressBar
             tasks={progressTasks}
@@ -265,7 +249,6 @@ export default function ScenarioRunner() {
             onTaskClick={handleTaskClick}
           />
 
-          {/* Submit Button */}
           <div className="mt-4">
             <button
               onClick={handleSubmitAll}
@@ -297,11 +280,11 @@ export default function ScenarioRunner() {
 
         {/* Task Content */}
         <div className="flex-1 bg-white rounded-lg border border-gray-200 p-6 overflow-hidden">
-          {currentTask?.type === 'reading' && currentTaskDetail?.prompt && (
+          {currentTask?.task_type === 'reading' && (
             <Task1Reading
               advertisement={{
-                title: currentTaskDetail.title,
-                body: currentTaskDetail.prompt.content.find((c) => c.type === 'text')?.content || '',
+                title: currentTask.title,
+                body: currentTask.description || '',
               }}
               attemptId={attemptId!}
               taskId={currentTask.id}
@@ -311,16 +294,12 @@ export default function ScenarioRunner() {
             />
           )}
 
-          {currentTask?.type === 'writing' && currentTaskDetail?.prompt && (
+          {currentTask?.task_type === 'writing' && (
             <Task2Writing
               referenceMaterials={{
-                resume: 'Resume content here',
-                job_description: currentTaskDetail.prompt.content.find((c) => c.type === 'text')?.content || '',
+                job_description: currentTask.description || '',
               }}
-              wordLimit={{
-                min: 150,
-                max: currentTaskDetail.prompt.max_words || 300,
-              }}
+              wordLimit={{ min: 150, max: 300 }}
               attemptId={attemptId!}
               taskId={currentTask.id}
               taskIndex={currentTaskIndex}
@@ -329,42 +308,44 @@ export default function ScenarioRunner() {
             />
           )}
 
-          {currentTask?.type === 'listening' && currentTaskDetail?.prompt && (
+          {currentTask?.task_type === 'listening' && (
             <Task3Listening
               attemptId={attemptId!}
               taskId={currentTask.id}
-              audioUrl={currentTaskDetail.prompt.content.find((c) => c.type === 'audio')?.content || ''}
-              audioDuration={currentTaskDetail.prompt.max_duration_seconds || 180}
-              timeLimit={currentTask.time_limit_seconds || 300}
+              audioUrl=""
+              audioDuration={180}
+              timeLimit={currentTask.time_limit_seconds || 900}
               initialNotes=""
-              onSubmit={async (notes: string, _audioReplayCount: number) => {
-                // Save the listening notes
-                await saveTaskResponse(currentTaskIndex, JSON.stringify({ notes, audioReplayCount: _audioReplayCount }))
+              onSubmit={async (notes: string, audioReplayCount: number) => {
+                await saveTaskResponse(currentTaskIndex, JSON.stringify({ notes, audioReplayCount }))
               }}
               onComplete={() => handleTaskSubmit(currentTaskIndex)}
               disabled={false}
             />
           )}
 
-          {currentTask?.type === 'speaking' && currentTaskDetail?.prompt && (
+          {currentTask?.task_type === 'speaking' && (
             <Task4Speaking
               attemptId={attemptId!}
               taskId={currentTask.id}
-              questions={currentTaskDetail.prompt.content
-                .filter((c) => c.type === 'text')
-                .map((c, idx) => ({
-                  id: `q-${idx}`,
-                  order: idx + 1,
-                  question: c.content,
-                  timeLimitSeconds: currentTaskDetail.prompt?.max_duration_seconds || 180,
-                })) as SpeakingQuestion[]}
+              questions={[{
+                id: 'q-1',
+                order: 1,
+                question: currentTask.description || 'Please answer the interview questions.',
+                timeLimitSeconds: currentTask.time_limit_seconds || 180,
+              }] as SpeakingQuestion[]}
               onSubmit={async (audioKeys: string[]) => {
-                // Save the speaking responses
                 await saveTaskResponse(currentTaskIndex, JSON.stringify({ audioKeys }))
               }}
               onComplete={() => handleTaskSubmit(currentTaskIndex)}
               disabled={false}
             />
+          )}
+
+          {!currentTask && (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              <p>No task selected</p>
+            </div>
           )}
         </div>
       </main>

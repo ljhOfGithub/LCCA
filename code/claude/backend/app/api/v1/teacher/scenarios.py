@@ -343,6 +343,64 @@ async def delete_scenario(
     await session.commit()
 
 
+@router.get("/scenarios/{scenario_id}/tasks", response_model=List[TaskResponse])
+async def list_tasks(
+    scenario_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
+    """List all tasks for a scenario."""
+    result = await session.execute(
+        select(Task)
+        .where(Task.scenario_id == scenario_id)
+        .order_by(Task.sequence_order)
+    )
+    tasks = result.scalars().all()
+    return [
+        TaskResponse(
+            id=str(t.id),
+            scenario_id=str(t.scenario_id),
+            title=t.title,
+            description=t.description,
+            task_type=t.task_type,
+            sequence_order=t.sequence_order,
+            time_limit_seconds=t.time_limit_seconds,
+        )
+        for t in tasks
+    ]
+
+
+@router.get("/scenarios/{scenario_id}/tasks/{task_index}", response_model=TaskResponse)
+async def get_task_by_index(
+    scenario_id: UUID,
+    task_index: int,
+    session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
+    """Get a task by its 0-based index (sequence order position)."""
+    result = await session.execute(
+        select(Task)
+        .where(Task.scenario_id == scenario_id)
+        .order_by(Task.sequence_order)
+        .offset(task_index)
+        .limit(1)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return TaskResponse(
+        id=str(task.id),
+        scenario_id=str(task.scenario_id),
+        title=task.title,
+        description=task.description,
+        task_type=task.task_type,
+        sequence_order=task.sequence_order,
+        time_limit_seconds=task.time_limit_seconds,
+    )
+
+
 @router.post("/scenarios/{scenario_id}/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def add_task(
     scenario_id: UUID,

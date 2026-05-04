@@ -20,8 +20,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from pydantic import BaseModel
+
 from app.db.session import get_session
-from app.models.attempt import Attempt, AttemptStatus
+from app.models.attempt import Attempt, AttemptStatus, TaskResponse, TaskResponseStatus
 from app.api.schemas.attempts import (
     AttemptCreate,
     AttemptResponse,
@@ -84,6 +86,24 @@ async def create_attempt(
     )
     session.add(attempt)
     await session.flush()
+
+    # Create a TaskResponse for every task in the scenario
+    from app.models.scenario import Task
+    from app.models.attempt import TaskResponse, TaskResponseStatus
+
+    tasks_result = await session.execute(
+        select(Task).where(Task.scenario_id == data.scenario_id).order_by(Task.sequence_order)
+    )
+    tasks = tasks_result.scalars().all()
+    for task in tasks:
+        task_response = TaskResponse(
+            attempt_id=attempt.id,
+            task_id=task.id,
+            status=TaskResponseStatus.NOT_STARTED,
+        )
+        session.add(task_response)
+
+    await session.commit()
     await session.refresh(attempt)
 
     return AttemptResponse(
@@ -315,19 +335,14 @@ async def submit_attempt(
     if attempt.student_id != student.id:
         raise HTTPException(status_code=403, detail="Not authorized for this attempt")
 
-    # Use state machine for the transition
-    sm = AttemptStateMachine(session)
-    try:
-        await sm.transition(attempt_id, "submit", actor_id=current_user.id)
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except AuthorizationError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    if attempt.status != AttemptStatus.IN_PROGRESS:
+        raise HTTPException(status_code=400, detail="Attempt is not in progress")
 
-    # TODO: Submit all task responses
-    # TODO: Trigger scoring job
-
+    attempt.status = AttemptStatus.SUBMITTED
+    attempt.submitted_at = datetime.now(timezone.utc)
+    await session.commit()
     await session.refresh(attempt)
+
     return AttemptDetailResponse(
         id=attempt.id,
         student_id=attempt.student_id,
@@ -339,4 +354,121 @@ async def submit_attempt(
         created_at=attempt.created_at,
         updated_at=attempt.updated_at,
         task_responses=[],
+    )
+
+
+# ============ Task Response endpoints ============
+
+class TaskResponseItem(BaseModel):
+    id: str
+    task_id: str
+    status: str
+    content: str | None = None
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
+
+
+class TaskResponseListResponse(BaseModel):
+    items: list[TaskResponseItem]
+
+
+class TaskResponseSaveRequest(BaseModel):
+    content: str
+
+
+@router.get("/{attempt_id}/responses", response_model=TaskResponseListResponse)
+async def list_task_responses(
+    attempt_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: Annotated = Depends(get_current_user),
+) -> TaskResponseListResponse:
+    """List all task responses for an attempt."""
+    result = await session.execute(
+        select(TaskResponse).where(TaskResponse.attempt_id == attempt_id)
+    )
+    responses = result.scalars().all()
+    return TaskResponseListResponse(
+        items=[
+            TaskResponseItem(
+                id=str(r.id),
+                task_id=str(r.task_id),
+                status=r.status.value,
+                content=r.content,
+                started_at=r.started_at,
+                submitted_at=r.submitted_at,
+            )
+            for r in responses
+        ]
+    )
+
+
+@router.put("/{attempt_id}/responses/{response_id}", response_model=TaskResponseItem)
+async def save_task_response(
+    attempt_id: UUID,
+    response_id: UUID,
+    data: TaskResponseSaveRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: Annotated = Depends(require_student()),
+) -> TaskResponseItem:
+    """Save (auto-save) content for a task response."""
+    result = await session.execute(
+        select(TaskResponse).where(
+            TaskResponse.id == response_id,
+            TaskResponse.attempt_id == attempt_id,
+        )
+    )
+    task_response = result.scalar_one_or_none()
+
+    if not task_response:
+        raise HTTPException(status_code=404, detail="Task response not found")
+
+    task_response.content = data.content
+    if task_response.status == TaskResponseStatus.NOT_STARTED:
+        task_response.status = TaskResponseStatus.IN_PROGRESS
+        task_response.started_at = datetime.now(timezone.utc)
+
+    await session.commit()
+    await session.refresh(task_response)
+
+    return TaskResponseItem(
+        id=str(task_response.id),
+        task_id=str(task_response.task_id),
+        status=task_response.status.value,
+        content=task_response.content,
+        started_at=task_response.started_at,
+        submitted_at=task_response.submitted_at,
+    )
+
+
+@router.post("/{attempt_id}/responses/{response_id}/submit", response_model=TaskResponseItem)
+async def submit_task_response(
+    attempt_id: UUID,
+    response_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: Annotated = Depends(require_student()),
+) -> TaskResponseItem:
+    """Submit a task response."""
+    result = await session.execute(
+        select(TaskResponse).where(
+            TaskResponse.id == response_id,
+            TaskResponse.attempt_id == attempt_id,
+        )
+    )
+    task_response = result.scalar_one_or_none()
+
+    if not task_response:
+        raise HTTPException(status_code=404, detail="Task response not found")
+
+    task_response.status = TaskResponseStatus.SUBMITTED
+    task_response.submitted_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(task_response)
+
+    return TaskResponseItem(
+        id=str(task_response.id),
+        task_id=str(task_response.task_id),
+        status=task_response.status.value,
+        content=task_response.content,
+        started_at=task_response.started_at,
+        submitted_at=task_response.submitted_at,
     )
