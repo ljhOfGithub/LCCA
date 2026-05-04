@@ -8,17 +8,25 @@ interface Task1ReadingProps {
   attemptId: string
   taskId: string
   taskIndex: number
+  initialContent?: string
   onSubmit?: () => void
   saveResponse: (taskIndex: number, content: string) => void
+  onContentChange?: (content: string) => void
 }
 
 export default function Task1Reading({
   advertisement,
   taskIndex,
+  initialContent = '',
   onSubmit,
   saveResponse,
+  onContentChange,
 }: Task1ReadingProps) {
-  const [notes, setNotes] = useState('')
+  const [notes, setNotes] = useState(initialContent)
+
+  useEffect(() => {
+    setNotes(initialContent)
+  }, [initialContent])
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -134,7 +142,10 @@ export default function Task1Reading({
           <div className="flex-1">
             <textarea
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                setNotes(e.target.value)
+                onContentChange?.(e.target.value)
+              }}
               placeholder="Take notes here... You can type freely."
               className="w-full h-full bg-white border border-gray-200 rounded-lg p-4 resize-none
                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent

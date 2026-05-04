@@ -78,6 +78,39 @@ async def create_attempt(
     if not student:
         raise HTTPException(status_code=403, detail="Student profile not found")
 
+    # Return existing active attempt if one exists (prevent duplicates)
+    existing_result = await session.execute(
+        select(Attempt)
+        .where(
+            Attempt.student_id == student.id,
+            Attempt.scenario_id == data.scenario_id,
+            Attempt.status.in_([AttemptStatus.CREATED, AttemptStatus.IN_PROGRESS]),
+        )
+        .order_by(Attempt.created_at.desc())
+        .limit(1)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        return AttemptResponse(
+            id=existing.id,
+            student_id=existing.student_id,
+            scenario_id=existing.scenario_id,
+            status=existing.status.value,
+        )
+
+    # Check if already submitted/scored
+    submitted_result = await session.execute(
+        select(Attempt)
+        .where(
+            Attempt.student_id == student.id,
+            Attempt.scenario_id == data.scenario_id,
+            Attempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.SCORED]),
+        )
+        .limit(1)
+    )
+    if submitted_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Exam already submitted")
+
     # Create attempt
     attempt = Attempt(
         student_id=student.id,
@@ -374,6 +407,39 @@ class TaskResponseListResponse(BaseModel):
 
 class TaskResponseSaveRequest(BaseModel):
     content: str
+
+
+class TaskNotesRequest(BaseModel):
+    notes: str
+
+
+@router.put("/{attempt_id}/tasks/{task_id}/response")
+async def save_response_by_task(
+    attempt_id: UUID,
+    task_id: UUID,
+    data: TaskNotesRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: Annotated = Depends(get_current_user),
+):
+    """Save task response content looked up by task_id (used by Task3Listening auto-save)."""
+    result = await session.execute(
+        select(TaskResponse).where(
+            TaskResponse.attempt_id == attempt_id,
+            TaskResponse.task_id == task_id,
+        )
+    )
+    task_response = result.scalar_one_or_none()
+
+    if not task_response:
+        raise HTTPException(status_code=404, detail="Task response not found")
+
+    task_response.content = data.notes
+    if task_response.status == TaskResponseStatus.NOT_STARTED:
+        task_response.status = TaskResponseStatus.IN_PROGRESS
+        task_response.started_at = datetime.now(timezone.utc)
+
+    await session.commit()
+    return {"status": "saved"}
 
 
 @router.get("/{attempt_id}/responses", response_model=TaskResponseListResponse)

@@ -231,7 +231,7 @@ export function useAudioRecording(maxDurationSeconds: number = 180) {
       recorderRef.current = new RecordRTC(stream, {
         type: 'audio',
         mimeType: 'audio/webm',
-        recorderType: RecordRTC.StereoAudioRecorder,
+        recorderType: RecordRTC.MediaStreamRecorder,
       })
 
       recorderRef.current.startRecording()
@@ -294,6 +294,9 @@ export function useAudioRecording(maxDurationSeconds: number = 180) {
 
       const response = await fetch('/api/v1/artifacts/upload', {
         method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
         body: formData,
       })
 

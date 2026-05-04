@@ -16,18 +16,26 @@ interface Task2WritingProps {
   attemptId: string
   taskId: string
   taskIndex: number
+  initialContent?: string
   onSubmit?: () => void
   saveResponse: (taskIndex: number, content: string) => void
+  onContentChange?: (content: string) => void
 }
 
 export default function Task2Writing({
   referenceMaterials,
   wordLimit = { min: 150, max: 300 },
   taskIndex,
+  initialContent = '',
   onSubmit,
   saveResponse,
+  onContentChange,
 }: Task2WritingProps) {
-  const [response, setResponse] = useState('')
+  const [response, setResponse] = useState(initialContent)
+
+  useEffect(() => {
+    setResponse(initialContent)
+  }, [initialContent])
   const [activeTab, setActiveTab] = useState<ReferenceTab>('resume')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -183,7 +191,10 @@ export default function Task2Writing({
           <div className="flex-1">
             <RichTextEditor
               content={response}
-              onChange={setResponse}
+              onChange={(val) => {
+                setResponse(val)
+                onContentChange?.(val)
+              }}
               placeholder="Write your cover letter here..."
               wordLimit={wordLimit}
             />

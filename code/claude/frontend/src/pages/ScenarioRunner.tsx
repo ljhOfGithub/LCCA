@@ -36,6 +36,7 @@ export default function ScenarioRunner() {
   const [attemptId, setAttemptId] = useState<string | null>(null)
   const [taskResponseIds, setTaskResponseIds] = useState<Record<number, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<number, string>>({})
+  const [taskContents, setTaskContents] = useState<Record<number, string>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -73,10 +74,21 @@ export default function ScenarioRunner() {
       const rawTasks: Task[] = scenarioResponse.data.tasks || []
       setTasks(rawTasks)
 
-      // Create attempt
-      const attemptResponse = await attemptApi.create(scenarioId!)
-      const aid = attemptResponse.data.id
-      setAttemptId(aid)
+      // Create attempt (returns existing if in-progress, 409 if already submitted)
+      let aid = ''
+      try {
+        const attemptResponse = await attemptApi.create(scenarioId!)
+        aid = attemptResponse.data.id
+        setAttemptId(aid)
+      } catch (err: any) {
+        if (err?.response?.status === 409) {
+          alert('You have already submitted this exam.')
+          navigate('/')
+          return
+        }
+        throw err
+      }
+      if (!aid) return
 
       // Initialize task statuses
       const initialStatuses: Record<number, string> = {}
@@ -108,19 +120,24 @@ export default function ScenarioRunner() {
         headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
       })
       const data = await res.json()
-      const items: { id: string; task_id: string; status: string }[] = data.items || []
+      const items: { id: string; task_id: string; status: string; content?: string }[] = data.items || []
 
       const newIds: Record<number, string> = {}
       const newStatuses: Record<number, string> = {}
+      const newContents: Record<number, string> = {}
       taskList.forEach((task: Task, index: number) => {
         const found = items.find((r) => r.task_id === task.id)
         if (found) {
           newIds[index] = found.id
           newStatuses[index] = found.status === 'submitted' ? 'completed' : found.status
+          if (found.content) {
+            newContents[index] = found.content
+          }
         }
       })
       setTaskResponseIds((prev) => ({ ...prev, ...newIds }))
       setTaskStatuses((prev) => ({ ...prev, ...newStatuses }))
+      setTaskContents((prev) => ({ ...prev, ...newContents }))
     } catch (error) {
       console.error('Failed to load task responses:', error)
     }
@@ -129,6 +146,8 @@ export default function ScenarioRunner() {
   const saveTaskResponse = async (taskIndex: number, content: string) => {
     const responseId = taskResponseIds[taskIndex]
     if (!responseId || !attemptId) return
+
+    setTaskContents((prev) => ({ ...prev, [taskIndex]: content }))
 
     try {
       await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}`, {
@@ -289,8 +308,12 @@ export default function ScenarioRunner() {
               attemptId={attemptId!}
               taskId={currentTask.id}
               taskIndex={currentTaskIndex}
+              initialContent={taskContents[currentTaskIndex] || ''}
               onSubmit={() => handleTaskSubmit(currentTaskIndex)}
               saveResponse={saveTaskResponse}
+              onContentChange={(content) =>
+                setTaskContents((prev) => ({ ...prev, [currentTaskIndex]: content }))
+              }
             />
           )}
 
@@ -303,26 +326,43 @@ export default function ScenarioRunner() {
               attemptId={attemptId!}
               taskId={currentTask.id}
               taskIndex={currentTaskIndex}
+              initialContent={taskContents[currentTaskIndex] || ''}
               onSubmit={() => handleTaskSubmit(currentTaskIndex)}
               saveResponse={saveTaskResponse}
+              onContentChange={(content) =>
+                setTaskContents((prev) => ({ ...prev, [currentTaskIndex]: content }))
+              }
             />
           )}
 
-          {currentTask?.task_type === 'listening' && (
-            <Task3Listening
-              attemptId={attemptId!}
-              taskId={currentTask.id}
-              audioUrl=""
-              audioDuration={180}
-              timeLimit={currentTask.time_limit_seconds || 900}
-              initialNotes=""
-              onSubmit={async (notes: string, audioReplayCount: number) => {
-                await saveTaskResponse(currentTaskIndex, JSON.stringify({ notes, audioReplayCount }))
-              }}
-              onComplete={() => handleTaskSubmit(currentTaskIndex)}
-              disabled={false}
-            />
-          )}
+          {currentTask?.task_type === 'listening' && (() => {
+            let listeningNotes = ''
+            const raw = taskContents[currentTaskIndex]
+            if (raw) {
+              try { listeningNotes = JSON.parse(raw).notes || raw } catch { listeningNotes = raw }
+            }
+            return (
+              <Task3Listening
+                attemptId={attemptId!}
+                taskId={currentTask.id}
+                audioUrl=""
+                audioDuration={180}
+                timeLimit={currentTask.time_limit_seconds || 900}
+                initialNotes={listeningNotes}
+                onSubmit={async (notes: string, audioReplayCount: number) => {
+                  await saveTaskResponse(currentTaskIndex, JSON.stringify({ notes, audioReplayCount }))
+                }}
+                onNotesChange={(notes) =>
+                  setTaskContents((prev) => ({
+                    ...prev,
+                    [currentTaskIndex]: JSON.stringify({ notes, audioReplayCount: 0 }),
+                  }))
+                }
+                onComplete={() => handleTaskSubmit(currentTaskIndex)}
+                disabled={false}
+              />
+            )
+          })()}
 
           {currentTask?.task_type === 'speaking' && (
             <Task4Speaking
@@ -334,8 +374,12 @@ export default function ScenarioRunner() {
                 question: currentTask.description || 'Please answer the interview questions.',
                 timeLimitSeconds: currentTask.time_limit_seconds || 180,
               }] as SpeakingQuestion[]}
+              initialContent={taskContents[currentTaskIndex] || ''}
               onSubmit={async (audioKeys: string[]) => {
                 await saveTaskResponse(currentTaskIndex, JSON.stringify({ audioKeys }))
+              }}
+              saveResponse={async (content: string) => {
+                await saveTaskResponse(currentTaskIndex, content)
               }}
               onComplete={() => handleTaskSubmit(currentTaskIndex)}
               disabled={false}

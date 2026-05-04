@@ -1,11 +1,10 @@
 """ResponseArtifact model for uploaded files."""
 import uuid
 
-from sqlalchemy import String, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.status import ArtifactStatus
 from app.models.base import Base, UUIDMixin, TimestampMixin
 
 
@@ -22,9 +21,9 @@ class ResponseArtifact(Base, UUIDMixin, TimestampMixin):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     file_size_bytes: Mapped[int | None] = mapped_column(nullable=True)
-    status: Mapped[ArtifactStatus] = mapped_column(
-        SAEnum(ArtifactStatus, name="artifact_status", create_constraint=True),
-        default=ArtifactStatus.UPLOADING,
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="uploading",
         nullable=False,
         index=True,
     )

@@ -35,8 +35,8 @@ const statusStyles = {
 const taskTypeLabels: Record<string, string> = {
   reading: 'Task 1: Reading & Notes',
   writing: 'Task 2: Writing',
-  speaking: 'Task 3: Speaking',
-  listening: 'Task 4: Listening',
+  listening: 'Task 3: Listening',
+  speaking: 'Task 4: Speaking',
 }
 
 export default function ProgressBar({

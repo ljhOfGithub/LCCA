@@ -78,6 +78,19 @@ export default function AudioPlayer({
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
+  if (!audioUrl) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-gray-500">
+        <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072" />
+        </svg>
+        <p className="text-sm">No audio file available for this task.</p>
+        <p className="text-xs text-gray-400 mt-1">Please proceed with the note-taking section below.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6">
       {/* Hidden Audio Element */}

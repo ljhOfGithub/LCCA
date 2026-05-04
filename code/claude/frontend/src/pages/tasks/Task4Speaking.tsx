@@ -12,8 +12,10 @@ interface Task4SpeakingProps {
   attemptId: string
   taskId: string
   questions: SpeakingQuestion[]
+  initialContent?: string
   onSubmit: (audioKeys: string[]) => Promise<void>
   onComplete: () => void
+  saveResponse?: (content: string) => Promise<void>
   disabled?: boolean
 }
 
@@ -21,12 +23,31 @@ export default function Task4Speaking({
   attemptId,
   taskId,
   questions,
+  initialContent,
   onSubmit,
   onComplete,
+  saveResponse,
   disabled = false,
 }: Task4SpeakingProps) {
+  // Restore recordings from persisted content (audio keys only, no blob URLs after remount)
+  const restoredRecordings = (() => {
+    if (!initialContent) return {}
+    try {
+      const parsed = JSON.parse(initialContent)
+      if (parsed.recordingMap && typeof parsed.recordingMap === 'object') return parsed.recordingMap
+      // Fallback: audioKeys array format (from final submit)
+      if (Array.isArray(parsed.audioKeys)) {
+        const map: Record<string, string> = {}
+        questions.forEach((q, idx) => { if (parsed.audioKeys[idx]) map[q.id] = parsed.audioKeys[idx] })
+        return map
+      }
+    } catch {}
+    return {}
+  })()
+
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
-  const [recordings, setRecordings] = useState<{ [key: string]: string }>({}) // questionId -> audioKey
+  const [recordings, setRecordings] = useState<{ [key: string]: string }>(restoredRecordings) // questionId -> audioKey
+  const [recordingBlobUrls, setRecordingBlobUrls] = useState<{ [key: string]: string }>({}) // questionId -> blob URL for playback
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
 
@@ -59,22 +80,27 @@ export default function Task4Speaking({
   const handleConfirmRecording = useCallback(async () => {
     if (!currentQuestion || !audioUrl) return
 
+    // Snapshot the blob URL before upload (uploadRecording might clear it)
+    const blobUrlSnapshot = audioUrl
+
     setIsTransitioning(true)
     try {
-      // Upload the recording
       const storageKey = await uploadRecording(attemptId, taskId)
 
-      // Save to local state
-      setRecordings((prev) => ({
-        ...prev,
-        [currentQuestion.id]: storageKey,
-      }))
+      const newRecordings = { ...recordings, [currentQuestion.id]: storageKey }
+      setRecordings(newRecordings)
+      setRecordingBlobUrls((prev) => ({ ...prev, [currentQuestion.id]: blobUrlSnapshot }))
+
+      // Persist after each confirmed recording so state survives task navigation
+      if (saveResponse) {
+        await saveResponse(JSON.stringify({ recordingMap: newRecordings })).catch(console.error)
+      }
     } catch (err) {
       console.error('Failed to save recording:', err)
     } finally {
       setIsTransitioning(false)
     }
-  }, [currentQuestion, audioUrl, uploadRecording, attemptId, taskId])
+  }, [currentQuestion, audioUrl, uploadRecording, attemptId, taskId, recordings, saveResponse])
 
   const handleNextQuestion = () => {
     if (currentQuestionIndex < questions.length - 1) {
@@ -182,7 +208,7 @@ export default function Task4Speaking({
               </div>
 
               <audio
-                src={audioUrl || undefined}
+                src={recordingBlobUrls[currentQuestion?.id] || audioUrl || undefined}
                 controls
                 className="w-full"
               />

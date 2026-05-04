@@ -11,6 +11,7 @@ interface Task3ListeningProps {
   initialNotes?: string
   onSubmit: (notes: string, audioReplayCount: number) => Promise<void>
   onComplete: () => void
+  onNotesChange?: (notes: string) => void
   disabled?: boolean
 }
 
@@ -23,9 +24,14 @@ export default function Task3Listening({
   initialNotes = '',
   onSubmit,
   onComplete,
+  onNotesChange,
   disabled = false,
 }: Task3ListeningProps) {
   const [notes, setNotes] = useState(initialNotes)
+
+  useEffect(() => {
+    setNotes(initialNotes)
+  }, [initialNotes])
   const [audioReplayCount, setAudioReplayCount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -85,7 +91,10 @@ export default function Task3Listening({
       // Save to backend
       await fetch(`/api/v1/attempts/${attemptId}/tasks/${taskId}/response`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
         body: JSON.stringify({ notes }),
       })
       setLastSaved(new Date())
@@ -170,7 +179,10 @@ export default function Task3Listening({
       <div className="flex-1 min-h-0">
         <NotesEditor
           value={notes}
-          onChange={setNotes}
+          onChange={(val) => {
+            setNotes(val)
+            onNotesChange?.(val)
+          }}
           disabled={disabled || isSubmitting}
           autoSave={true}
           onAutoSave={handleAutoSave}

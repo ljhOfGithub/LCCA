@@ -10,7 +10,11 @@ from typing import Annotated
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import uuid as uuid_lib
+import asyncio
+from functools import partial
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -24,7 +28,6 @@ from app.api.schemas.artifacts import (
     ArtifactDeleteResponse,
 )
 from app.core.security import get_current_user
-from app.core.status import ArtifactStatus
 
 router = APIRouter()
 
@@ -93,7 +96,7 @@ async def get_upload_url(
         filename=data.filename,
         mime_type=data.content_type,
         file_size_bytes=data.size_bytes,
-        status=ArtifactStatus.UPLOADING,
+        status="uploading",
     )
     session.add(artifact)
     await session.flush()
@@ -174,7 +177,7 @@ async def confirm_upload(
             if role == UserRole.STUDENT and student_id != attempt.student_id:
                 raise HTTPException(status_code=403, detail="Not authorized")
 
-    artifact.status = ArtifactStatus.UPLOADED
+    artifact.status = "uploaded"
     await session.commit()
     await session.refresh(artifact)
 
@@ -182,7 +185,7 @@ async def confirm_upload(
         id=artifact.id,
         task_response_id=artifact.task_response_id,
         type=artifact.artifact_type,
-        status=artifact.status.value,
+        status=artifact.status,
         filename=artifact.filename,
         size_bytes=artifact.file_size_bytes or 0,
         s3_key=artifact.storage_key,
@@ -212,7 +215,7 @@ async def get_artifact(
         id=artifact.id,
         task_response_id=artifact.task_response_id,
         type=artifact.artifact_type,
-        status=artifact.status.value,
+        status=artifact.status,
         filename=artifact.filename,
         size_bytes=artifact.file_size_bytes or 0,
         s3_key=artifact.storage_key,
@@ -276,3 +279,85 @@ async def delete_artifact(
         id=artifact_id,
         message="Artifact deleted successfully",
     )
+
+
+@router.post("/upload")
+async def upload_artifact_direct(
+    file: UploadFile = File(...),
+    attemptId: str = Form(...),
+    taskId: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: Annotated = Depends(get_current_user),
+):
+    """Direct file upload endpoint for audio and other artifacts.
+
+    Accepts multipart/form-data with fields: file, attemptId, taskId.
+    Returns { storageKey, url }.
+    """
+    from app.core.config import settings
+    from app.models.attempt import TaskResponse, TaskResponseStatus
+    from uuid import UUID
+    import boto3
+    from botocore.exceptions import ClientError
+
+    # Find task response
+    try:
+        tr_result = await session.execute(
+            select(TaskResponse).where(
+                TaskResponse.attempt_id == UUID(attemptId),
+                TaskResponse.task_id == UUID(taskId),
+            )
+        )
+        task_response = tr_result.scalar_one_or_none()
+    except Exception:
+        task_response = None
+
+    # Generate storage key
+    ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "webm"
+    storage_key = f"responses/{attemptId}/{taskId}/{uuid_lib.uuid4()}.{ext}"
+
+    # Read file content
+    content = await file.read()
+
+    # Upload to MinIO (run sync boto3 in thread)
+    def do_upload():
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+        )
+        s3.put_object(
+            Bucket=settings.s3_bucket,
+            Key=storage_key,
+            Body=content,
+            ContentType=file.content_type or "application/octet-stream",
+        )
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, do_upload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+    # Create artifact record if task_response found
+    if task_response:
+        artifact = ResponseArtifact(
+            task_response_id=task_response.id,
+            artifact_type="audio",
+            storage_key=storage_key,
+            filename=file.filename or f"recording.{ext}",
+            mime_type=file.content_type,
+            file_size_bytes=len(content),
+            status="uploaded",
+        )
+        session.add(artifact)
+        await session.commit()
+
+    # Build URL accessible from browser (replace internal hostname with localhost)
+    import os
+    public_endpoint = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
+    public_url = f"{public_endpoint}/{settings.s3_bucket}/{storage_key}"
+
+    return {"storageKey": storage_key, "url": public_url}
