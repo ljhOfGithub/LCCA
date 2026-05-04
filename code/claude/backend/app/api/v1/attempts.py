@@ -254,33 +254,22 @@ async def start_attempt(
     # Check for timeout on resume
     if attempt.status == AttemptStatus.IN_PROGRESS and attempt.started_at:
         if is_attempt_expired(attempt.started_at):
-            # Use state machine to transition to SUBMITTED
-            sm = AttemptStateMachine(session)
-            try:
-                await sm.transition(attempt_id, "submit", actor_id=current_user.id)
-            except ValidationError as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            except AuthorizationError as e:
-                raise HTTPException(status_code=403, detail=str(e))
+            attempt.status = AttemptStatus.SUBMITTED
+            attempt.submitted_at = datetime.now(timezone.utc)
+            await session.commit()
             raise HTTPException(
                 status_code=400,
                 detail="Attempt has timed out and was auto-submitted"
             )
 
     # Use state machine for the transition
-    sm = AttemptStateMachine(session)
-    try:
-        # For CREATED status, use "start" event
-        # For IN_PROGRESS (resume), we just update started_at if needed
-        if attempt.status == AttemptStatus.CREATED:
-            await sm.transition(attempt_id, "start", actor_id=current_user.id)
-        else:
-            # Just refresh the attempt for resume
-            await session.refresh(attempt)
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except AuthorizationError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    if attempt.status == AttemptStatus.CREATED:
+        attempt.status = AttemptStatus.IN_PROGRESS
+        attempt.started_at = datetime.now(timezone.utc)
+        await session.commit()
+    else:
+        # Just refresh the attempt for resume
+        await session.refresh(attempt)
 
     await session.refresh(attempt)
     return AttemptResponse(
