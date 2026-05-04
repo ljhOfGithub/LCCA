@@ -219,10 +219,23 @@
   - ai_cefr_level
   - ai_band
   - prompt_template_id
-  - model_name
-  - model_temperature
-  - model_metadata
-  - model_response
+  - ai_metadata
+    - prompt_template_id
+    - prompt_template_version
+    - request_payload
+    - model_name
+    - model_temperature
+    - model_metadata
+    - model_response
+      - criterion_bands
+        - code
+        - band
+        - rationale
+        - evidence_ref
+      - overall_band
+      - confidence
+    - tokens_used
+    - latency_ms
   - rater_type
   - rater_id
   - completed_at
@@ -230,8 +243,9 @@
   - score_run_id
   - criterion_id
   - band(1-4)
+  - rationale
+  - evidence_ref
   - completed_at
-  - mapped_cefr_level
 - 最终评分结果 attempt_result
   - aid
   - score_run_id_list

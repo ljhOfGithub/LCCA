@@ -7,3 +7,16 @@ node_modules
 !daily/**/*.md
 !code/**/*.png
 !.gitignore
+!code/claude/backend/**/*.py
+!code/claude/backend/**/Dockerfile
+!code/claude/backend/**/*.txt
+!code/claude/backend/**/*.toml
+!code/claude/frontend/**/*.ts
+!code/claude/frontend/**/*.tsx
+!code/claude/frontend/**/*.js
+!code/claude/frontend/**/*.css
+!code/claude/frontend/**/*.html
+!code/claude/frontend/**/*.json
+!code/claude/**/*.env
+!code/claude/**/*.yml
+!code/claude/**/Makefile
