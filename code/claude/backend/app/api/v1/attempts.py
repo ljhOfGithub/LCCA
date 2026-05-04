@@ -113,7 +113,7 @@ async def list_attempts(
 
     # Determine if user can see all attempts
     role = get_user_role(current_user)
-    can_see_all = role in [UserRole.ADMIN, UserRole.TEACHER]
+    can_see_all = role in [UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT]
 
     query = select(Attempt)
 

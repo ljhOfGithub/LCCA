@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class AttemptCreate(BaseModel):
     """Request body for creating a new attempt."""
-    user_id: UUID = Field(..., description="UUID of the student taking the exam")
     scenario_id: UUID = Field(..., description="UUID of the scenario/exam to take")
 
     model_config = ConfigDict(str_strip_whitespace=True)

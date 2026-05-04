@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
     app.include_router(student_scenarios.router, prefix="/api/v1", tags=["student-scenarios"])
-    app.include_router(attempts.router, prefix="/api/v1", tags=["attempts"])
+    app.include_router(attempts.router, prefix="/api/v1/attempts", tags=["attempts"])
     app.include_router(scoring.router, prefix="/api/v1", tags=["scoring"])
     app.include_router(timeout_routes.router, prefix="/api/v1", tags=["timeout"])
     app.include_router(results.router, prefix="/api/v1", tags=["results"])

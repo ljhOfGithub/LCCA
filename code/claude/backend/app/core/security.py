@@ -83,6 +83,7 @@ def require_role(allowed_roles: list[UserRole]):
     """Dependency to require specific roles."""
     async def role_checker(
         token: str = Depends(oauth2_scheme),
+        session: AsyncSession = Depends(get_session),
     ) -> "User":
         """Check role from JWT payload, verify user exists separately."""
         payload = verify_token(token)
@@ -116,15 +117,14 @@ def require_role(allowed_roles: list[UserRole]):
             )
 
         from app.models.user import User
-        async with AsyncSession() as session:
-            result = await session.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
-            if user is None or not user.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="User not found or inactive",
-                )
-            return user
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive",
+            )
+        return user
 
     return role_checker
 
