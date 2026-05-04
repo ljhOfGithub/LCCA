@@ -4,6 +4,7 @@ import ScenarioRunner from './pages/ScenarioRunner'
 import SubmissionConfirmation from './pages/SubmissionConfirmation'
 import WaitingForScoring from './pages/WaitingForScoring'
 import ResultReport from './pages/ResultReport'
+import ResultPage from './pages/ResultPage'
 import LoginPage from './pages/LoginPage'
 import type { ExamResult } from './types'
 
@@ -59,6 +60,7 @@ function App() {
         <Route path="/exam/:scenarioId/submit" element={<SubmissionConfirmationPage />} />
         <Route path="/exam/:scenarioId/waiting" element={<WaitingForScoringPage />} />
         <Route path="/exam/:scenarioId/result" element={<ResultReportPage />} />
+        <Route path="/result/:attemptId" element={<ResultPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

@@ -106,8 +106,7 @@ export default function ScenarioRunner() {
         setAttemptId(aid)
       } catch (err: any) {
         if (err?.response?.status === 409) {
-          alert('You have already submitted this exam.')
-          navigate('/')
+          navigate('/', { state: { submitted: true } })
           return
         }
         throw err
@@ -229,8 +228,7 @@ export default function ScenarioRunner() {
     setIsSubmitting(true)
     try {
       await attemptApi.submit(attemptId, true)
-      alert('Your answers have been submitted.')
-      navigate('/')
+      navigate(`/result/${attemptId}`)
     } catch (error) {
       console.error('Failed to submit exam:', error)
       alert('Failed to submit. Please try again.')

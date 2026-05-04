@@ -95,6 +95,18 @@ services:
       S3_BUCKET: lcca-artifacts
       S3_REGION: us-east-1
       DEBUG: "true"
+      # ── LLM provider (pick ONE) ──────────────────────────────────
+      # Option A: Anthropic Claude
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_MODEL: "claude-sonnet-4-6"
+      # Option B: MiniMax (or any OpenAI-compatible)
+      LLM_API_KEY: "sk-api-motj0siSdCkS4t-e17JTmB5C0J53sAwvdwXCkxQHhW9vnC7C5NdsCgzqJUhdLJQyXDsDgPW6xOdq41kHrNw6Q4l-V9QRDMMAGCAgNGZrl4g583wYDMplr88"
+      LLM_BASE_URL: "https://api.minimax.chat/v1"
+      LLM_MODEL: "MiniMax-Text-01"
+      # ── ASR provider ─────────────────────────────────────────────
+      # MiniMax ASR (Whisper-compatible endpoint)
+      ASR_API_KEY: "sk-api-motj0siSdCkS4t-e17JTmB5C0J53sAwvdwXCkxQHhW9vnC7C5NdsCgzqJUhdLJQyXDsDgPW6xOdq41kHrNw6Q4l-V9QRDMMAGCAgNGZrl4g583wYDMplr88"
+      ASR_API_URL: "https://api.minimax.chat/v1/audio/transcriptions"
     depends_on:
       postgres:
         condition: service_healthy

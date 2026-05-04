@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { scenarioApi, authApi } from '../api/client'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { scenarioApi, authApi, attemptApi } from '../api/client'
 import TeacherDashboard from './TeacherDashboard'
 import type { Scenario } from '../types'
 
@@ -24,24 +24,38 @@ const statusConfig = {
 
 export default function ScenarioList() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const justSubmitted = (location.state as any)?.submitted === true
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userName, setUserName] = useState('')
+  const [submittedScenarioIds, setSubmittedScenarioIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    // Fetch user role first, redirect to login if not authenticated
+    if (!localStorage.getItem('access_token')) { navigate('/login'); return }
+
     authApi.me().then(r => {
       setUserRole(r.data.role)
       setUserName(r.data.full_name || r.data.email)
     }).catch((err: any) => {
-      // Only redirect to login for authentication errors, not other failures
-      if (err?.response?.status === 401 || !localStorage.getItem('access_token')) {
-        navigate('/login')
-      }
+      if (err?.response?.status === 401) navigate('/login')
     })
+
     loadScenarios()
+
+    // Load student's submitted attempts to disable already-submitted scenarios
+    attemptApi.list({ status: 'submitted' }).then(r => {
+      const items: { scenario_id: string }[] = r.data.items || []
+      setSubmittedScenarioIds(new Set(items.map(a => a.scenario_id)))
+    }).catch(() => {})
+
+    // Also load scored attempts
+    attemptApi.list({ status: 'scored' }).then(r => {
+      const items: { scenario_id: string }[] = r.data.items || []
+      setSubmittedScenarioIds(prev => new Set([...prev, ...items.map(a => a.scenario_id)]))
+    }).catch(() => {})
   }, [])
 
   const loadScenarios = async () => {
@@ -118,6 +132,19 @@ export default function ScenarioList() {
         {isLoading && (
           <div className="flex justify-center items-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        )}
+
+        {/* Submitted banner */}
+        {justSubmitted && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center gap-3">
+            <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-blue-800 text-sm font-medium">
+              You have already submitted this assessment. Results will be available once scored by your teacher.
+            </p>
           </div>
         )}
 
@@ -206,27 +233,30 @@ export default function ScenarioList() {
 
                   {/* Card Footer */}
                   <div className="px-6 py-4 border-t border-gray-100">
-                    <Link
-                      to={`/exam/${scenario.id}`}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
-                        bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
-                      Start Assessment
-                    </Link>
+                    {submittedScenarioIds.has(scenario.id) ? (
+                      <div className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+                        bg-gray-100 text-gray-500 cursor-not-allowed">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Already Submitted
+                      </div>
+                    ) : (
+                      <Link
+                        to={`/exam/${scenario.id}`}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+                          bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Start Assessment
+                      </Link>
+                    )}
                   </div>
                 </div>
               )

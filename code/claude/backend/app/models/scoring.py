@@ -17,7 +17,7 @@ class ScoreRun(Base, UUIDMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("task_responses.id"), nullable=False, index=True
     )
     status: Mapped[ScoreRunStatus] = mapped_column(
-        SAEnum(ScoreRunStatus, name="score_run_status", create_constraint=True),
+        SAEnum(ScoreRunStatus, name="score_run_status", native_enum=False),
         default=ScoreRunStatus.PENDING,
         nullable=False,
         index=True,
@@ -46,16 +46,21 @@ class ScoreDetail(Base, UUIDMixin, TimestampMixin):
     task_response_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("task_responses.id"), nullable=False, index=True
     )
-    criterion_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("criteria.id"), nullable=False, index=True
+    criterion_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("criteria.id"), nullable=True, index=True
     )
+    criterion_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_score: Mapped[float] = mapped_column(Float, nullable=False)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Teacher override fields
+    is_teacher_reviewed: Mapped[bool] = mapped_column(default=False, nullable=False)
+    teacher_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    teacher_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     score_run: Mapped["ScoreRun"] = relationship("ScoreRun", back_populates="score_details")
     task_response: Mapped["TaskResponse"] = relationship("TaskResponse", back_populates="score_details")
-    criterion: Mapped["Criterion"] = relationship("Criterion")
+    criterion: Mapped["Criterion | None"] = relationship("Criterion")
 
 
 class AttemptResult(Base, UUIDMixin, TimestampMixin):
@@ -64,10 +69,12 @@ class AttemptResult(Base, UUIDMixin, TimestampMixin):
     attempt_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("attempts.id"), unique=True, nullable=False, index=True
     )
-    cefr_level: Mapped[str] = mapped_column(String(10), nullable=False)  # e.g., "B2", "C1"
+    cefr_level: Mapped[str] = mapped_column(String(10), nullable=False)
     overall_score: Mapped[float] = mapped_column(Float, nullable=False)
     overall_score_max: Mapped[float] = mapped_column(Float, nullable=False)
-    band_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # IELTS-style band
+    band_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    teacher_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_finalized: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     attempt: Mapped["Attempt"] = relationship("Attempt", back_populates="result")
 
