@@ -166,35 +166,32 @@ async def list_attempts(
 
     # Determine if user can see all attempts
     role = get_user_role(current_user)
-    can_see_all = role in [UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT]
+    can_see_all = role in [UserRole.ADMIN, UserRole.TEACHER]
 
     query = select(Attempt)
 
     # Apply filters
-    if user_id:
-        query = query.where(Attempt.student_id == user_id)
-    elif not can_see_all:
-        # Non-admin users can only see their own attempts
+    if not can_see_all:
+        # Students always see only their own attempts; user_id param is ignored
         student_result = await session.execute(
             select(Student.id).where(Student.user_id == current_user.id)
         )
         student_id = student_result.scalar_one_or_none()
-        if student_id:
-            query = query.where(Attempt.student_id == student_id)
-        else:
-            # Return empty list if no student profile
+        if not student_id:
             return AttemptListResponse(items=[], total=0, page=page, per_page=per_page, pages=0)
+        query = query.where(Attempt.student_id == student_id)
+    elif user_id:
+        query = query.where(Attempt.student_id == user_id)
 
     if status:
         query = query.where(Attempt.status == AttemptStatus(status))
 
     # Get total count
     count_query = select(Attempt.id)
-    if user_id:
+    if not can_see_all:
+        count_query = count_query.where(Attempt.student_id == student_id)
+    elif user_id:
         count_query = count_query.where(Attempt.student_id == user_id)
-    elif not can_see_all:
-        if 'student_id' in locals():
-            count_query = count_query.where(Attempt.student_id == student_id)
 
     total_result = await session.execute(count_query)
     total = len(total_result.scalars().all())
