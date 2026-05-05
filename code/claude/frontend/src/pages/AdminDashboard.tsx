@@ -1097,6 +1097,34 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
           )}
         </div>
 
+        {/* Available variables reference */}
+        <details className="border border-gray-200 rounded-lg">
+          <summary className="px-3 py-2 text-xs font-medium text-gray-600 cursor-pointer select-none hover:bg-gray-50">
+            Available template variables <span className="font-normal text-gray-400">(click to expand)</span>
+          </summary>
+          <div className="px-3 pb-3 pt-1 grid grid-cols-2 gap-x-6 gap-y-1">
+            {[
+              ['{task_title}', 'Task title'],
+              ['{task_type}', 'reading / writing / listening / speaking'],
+              ['{task_description}', 'Task description'],
+              ['{materials}', 'All text materials joined (type header + content)'],
+              ['{material_<type>}', 'Material by type, e.g. {material_job_ad}'],
+              ['{criteria}', 'Criteria list with max scores and descriptions'],
+              ['{criteria_with_bands}', 'Criteria + CEFR band descriptors per criterion'],
+              ['{submission}', "Student's text response (writing / reading / listening)"],
+              ['{transcription}', "Student's speech transcribed (speaking)"],
+              ['{max_score}', 'Highest single criterion max score'],
+              ['{total_max_score}', 'Sum of all criteria max scores'],
+              ['{json_format}', 'Reminder of the required JSON output format'],
+            ].map(([v, desc]) => (
+              <div key={v} className="flex gap-2 items-start py-0.5">
+                <code className="text-xs font-mono text-purple-700 whitespace-nowrap flex-shrink-0">{v}</code>
+                <span className="text-xs text-gray-500">{desc}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">System Prompt *</label>
           <textarea value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} rows={8}
@@ -1104,7 +1132,7 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">
-            User Prompt Template * <span className="text-gray-400 font-normal">(use {'{{variable}}'} for placeholders)</span>
+            User Prompt Template * <span className="text-gray-400 font-normal">(use {'{variable}'} placeholders from the list above)</span>
           </label>
           <textarea value={userPrompt} onChange={e => setUserPrompt(e.target.value)} rows={16}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />

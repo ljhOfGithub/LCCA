@@ -4,14 +4,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.status import ScoreRunStatus, TaskResponseStatus
 from app.models.attempt import TaskResponse, Attempt, AttemptStatus
 from app.models.artifact import ResponseArtifact, ArtifactStatus
 from app.models.rubric import Rubric, Criterion, PromptTemplate
+from app.models.scenario import Task, Material
 from app.services.llm import (
     LLMClient,
     LLMProvider,
@@ -120,9 +124,11 @@ class Scorer:
 
         logger.info(f"Scoring task response {task_response_id}")
 
-        # Get task response and related data
+        # Get task response with eager-loaded task and its materials
         result = await self.session.execute(
-            select(TaskResponse).where(TaskResponse.id == uuid.UUID(task_response_id))
+            select(TaskResponse)
+            .options(selectinload(TaskResponse.task).selectinload(Task.materials))
+            .where(TaskResponse.id == uuid.UUID(task_response_id))
         )
         task_response = result.scalar_one_or_none()
 
@@ -177,6 +183,9 @@ class Scorer:
             if prompt_template:
                 score_run.prompt_template_name = prompt_template.name
 
+            # Build a map from criterion_id → name for convenience
+            criteria_by_id = {str(c.id): c.name for c in criteria}
+
             # Save score details
             score_details = []
             for criterion_id, score_data in scores.items():
@@ -184,6 +193,7 @@ class Scorer:
                     score_run_id=score_run.id,
                     task_response_id=task_response.id,
                     criterion_id=uuid.UUID(criterion_id),
+                    criterion_name=criteria_by_id.get(criterion_id, score_data.get("feedback", "")),
                     score=score_data["score"],
                     max_score=score_data["max_score"],
                     feedback=score_data.get("feedback"),
@@ -317,91 +327,100 @@ class Scorer:
                 return t
         return None
 
-    async def _score_text(
+    def _build_template_vars(
         self,
-        llm: LLMClient,
         task,
-        content: str,
         criteria: list[Criterion],
-        prompt_template: PromptTemplate | None = None,
-    ) -> tuple[dict[str, dict], str | None]:
-        """Score text-based responses.
+        submission: str = "",
+        transcription: str = "",
+    ) -> dict:
+        """Build the full variable context for prompt template rendering.
 
-        Args:
-            llm: LLM client
-            task: Task object
-            content: Text content
-            criteria: List of criteria
-            prompt_template: Optional custom prompt template from DB
-
-        Returns:
-            Tuple of (scores dict, raw LLM response or None)
+        All keys are available as {variable_name} placeholders in templates.
+        Missing keys in the template are left as-is (SafeDict behaviour).
         """
-        if content.startswith("artifact:"):
-            # Need to fetch artifact content from storage
-            # Placeholder - actual implementation would fetch from S3
-            content = "[Content fetched from artifact]"
+        # Task materials — plain text content joined by type
+        materials = getattr(task, "materials", []) or []
+        materials_text = "\n\n".join(
+            f"[{m.material_type.upper()}]\n{m.content}"
+            for m in materials if m.content
+        )
+        materials_by_type: dict[str, str] = {}
+        for m in materials:
+            if m.content:
+                materials_by_type.setdefault(m.material_type, m.content)
 
-        criteria_dicts = [
-            {
-                "name": c.name,
-                "description": c.description or "",
-                "max_score": c.max_score,
-            }
+        # Criteria — simple list
+        criteria_lines = "\n".join(
+            f"- {c.name} (max {c.max_score}): {c.description or ''}"
             for c in criteria
-        ]
-
-        # Use custom prompt template if available, otherwise default
-        if prompt_template:
-            system_prompt = prompt_template.system_prompt
-            user_prompt = prompt_template.user_prompt_template.format(
-                task_title=getattr(task, "title", "Unknown Task"),
-                criteria="\n".join(
-                    f"- {c['name']} (max {c['max_score']}): {c['description']}"
-                    for c in criteria_dicts
-                ),
-                submission=content,
-            )
-            model = prompt_template.model
-            temperature = prompt_template.temperature
-        else:
-            system_prompt = WRITING_SYSTEM_PROMPT
-            user_prompt = get_writing_prompt(
-                task_title=getattr(task, "title", "Unknown Task"),
-                criteria=criteria_dicts,
-                submission=content,
-            )
-            model = None
-            temperature = 0.3
-
-        response = await llm.complete(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=2000,
-            model=model,
         )
 
-        # Get raw response for storage
-        raw_response = None
-        if hasattr(response, 'raw_response') and response.raw_response:
-            raw_response = str(response.raw_response)
-
-        parsed = parse_score_response(response.content)
-
-        # Map back to criterion IDs
-        scores = {}
+        # Criteria with CEFR band descriptors
+        cefr_lines_parts = []
         for c in criteria:
-            for score_entry in parsed.get("scores", []):
-                if score_entry.get("criterion") == c.name:
+            part = f"Criterion: {c.name} (max {c.max_score})\n  Description: {c.description or ''}"
+            if c.cefr_descriptors:
+                try:
+                    bands = json.loads(c.cefr_descriptors)
+                    band_text = "\n".join(f"  {level}: {desc}" for level, desc in bands.items())
+                    part += f"\n  CEFR bands:\n{band_text}"
+                except Exception:
+                    pass
+            cefr_lines_parts.append(part)
+        criteria_with_bands = "\n\n".join(cefr_lines_parts)
+
+        max_score = max((c.max_score for c in criteria), default=10)
+        total_max = sum(c.max_score for c in criteria)
+
+        return {
+            # Task info
+            "task_title": getattr(task, "title", ""),
+            "task_type": str(getattr(task, "task_type", "")),
+            "task_description": getattr(task, "description", "") or "",
+            # Materials
+            "materials": materials_text,
+            **{f"material_{k}": v for k, v in materials_by_type.items()},
+            # Criteria
+            "criteria": criteria_lines,
+            "criteria_with_bands": criteria_with_bands,
+            # Student response
+            "submission": submission,
+            "transcription": transcription,
+            # Score hints
+            "max_score": max_score,
+            "total_max_score": total_max,
+            # Output format reminder
+            "json_format": (
+                '{"scores": [{"criterion": "<name>", "score": <number>,'
+                ' "max_score": <number>, "feedback": "<text>"}],'
+                ' "overall_feedback": "<summary>", "cefr_level": "<A2|B1|B2|C1>"}'
+            ),
+        }
+
+    @staticmethod
+    def _render_template(template_str: str, vars: dict) -> str:
+        """Render a prompt template, leaving unknown {placeholders} intact."""
+        class SafeDict(dict):
+            def __missing__(self, key: str) -> str:
+                return "{" + key + "}"
+        return template_str.format_map(SafeDict(**vars))
+
+    @staticmethod
+    def _map_scores(parsed: dict, criteria: list[Criterion]) -> dict:
+        """Map LLM score entries back to criterion IDs."""
+        scores: dict[str, dict] = {}
+        for c in criteria:
+            for entry in parsed.get("scores", []):
+                if entry.get("criterion") == c.name:
                     scores[str(c.id)] = {
-                        "score": score_entry.get("score"),
-                        "max_score": score_entry.get("max_score", c.max_score),
-                        "feedback": score_entry.get("feedback"),
+                        "score": entry.get("score"),
+                        "max_score": entry.get("max_score", c.max_score),
+                        "feedback": entry.get("feedback"),
                     }
                     break
 
-        # Handle case where criterion names don't match exactly
+        # Positional fallback when names don't match
         if not scores and parsed.get("scores"):
             for i, c in enumerate(criteria):
                 if i < len(parsed["scores"]):
@@ -411,8 +430,50 @@ class Scorer:
                         "max_score": entry.get("max_score", c.max_score),
                         "feedback": entry.get("feedback"),
                     }
+        return scores
 
-        return scores, raw_response
+    async def _score_text(
+        self,
+        llm: LLMClient,
+        task,
+        content: str,
+        criteria: list[Criterion],
+        prompt_template: PromptTemplate | None = None,
+    ) -> tuple[dict[str, dict], str | None]:
+        if content.startswith("artifact:"):
+            content = "[Content fetched from artifact]"
+
+        if prompt_template:
+            vars = self._build_template_vars(task, criteria, submission=content)
+            system_prompt = self._render_template(prompt_template.system_prompt, vars)
+            user_prompt = self._render_template(prompt_template.user_prompt_template, vars)
+            model = prompt_template.model
+            temperature = prompt_template.temperature
+        else:
+            criteria_dicts = [
+                {"name": c.name, "description": c.description or "", "max_score": c.max_score}
+                for c in criteria
+            ]
+            system_prompt = WRITING_SYSTEM_PROMPT
+            user_prompt = get_writing_prompt(
+                task_title=getattr(task, "title", ""),
+                criteria=criteria_dicts,
+                submission=content,
+            )
+            model = None
+            temperature = 0.3
+
+        response = await llm.complete(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=2000,
+            model=model,
+        )
+
+        raw_response = str(response.raw_response) if getattr(response, "raw_response", None) else None
+        parsed = parse_score_response(response.content)
+        return self._map_scores(parsed, criteria), raw_response
 
     async def _score_speaking(
         self,
@@ -422,60 +483,27 @@ class Scorer:
         criteria: list[Criterion],
         prompt_template: PromptTemplate | None = None,
     ) -> tuple[dict[str, dict], str | None]:
-        """Score speaking responses (requires ASR first).
-
-        Args:
-            llm: LLM client
-            task: Task object
-            audio_storage_key: S3 storage key for audio
-            criteria: List of criteria
-            prompt_template: Optional custom prompt template from DB
-
-        Returns:
-            Tuple of (scores dict, raw LLM response or None)
-        """
-        # Transcribe audio using ASR
-        asr_client = WhisperClient(
-            api_key=settings.asr_api_key or settings.llm_api_key,
-        )
-
-        transcription = await asr_client.transcribe(
-            audio_url=audio_storage_key,
-            language="en",
-        )
-
+        asr_client = WhisperClient(api_key=settings.asr_api_key or settings.llm_api_key)
+        transcription = await asr_client.transcribe(audio_url=audio_storage_key, language="en")
         await asr_client.close()
 
         if not transcription:
             raise ValueError("ASR returned empty transcription")
 
-        criteria_dicts = [
-            {
-                "name": c.name,
-                "description": c.description or "",
-                "max_score": c.max_score,
-            }
-            for c in criteria
-        ]
-
-        # Use custom prompt template if available, otherwise default
         if prompt_template:
-            system_prompt = prompt_template.system_prompt
-            user_prompt = prompt_template.user_prompt_template.format(
-                task_title=getattr(task, "title", "Unknown Task"),
-                question=getattr(task, "question", ""),
-                transcription=transcription,
-                criteria="\n".join(
-                    f"- {c['name']} (max {c['max_score']}): {c['description']}"
-                    for c in criteria_dicts
-                ),
-            )
+            vars = self._build_template_vars(task, criteria, transcription=transcription)
+            system_prompt = self._render_template(prompt_template.system_prompt, vars)
+            user_prompt = self._render_template(prompt_template.user_prompt_template, vars)
             model = prompt_template.model
             temperature = prompt_template.temperature
         else:
+            criteria_dicts = [
+                {"name": c.name, "description": c.description or "", "max_score": c.max_score}
+                for c in criteria
+            ]
             system_prompt = SPEAKING_SYSTEM_PROMPT
             user_prompt = get_speaking_prompt(
-                task_title=getattr(task, "title", "Unknown Task"),
+                task_title=getattr(task, "title", ""),
                 question=getattr(task, "question", ""),
                 transcription=transcription,
                 criteria=criteria_dicts,
@@ -491,26 +519,9 @@ class Scorer:
             model=model,
         )
 
-        # Get raw response for storage
-        raw_response = None
-        if hasattr(response, 'raw_response') and response.raw_response:
-            raw_response = str(response.raw_response)
-
+        raw_response = str(response.raw_response) if getattr(response, "raw_response", None) else None
         parsed = parse_score_response(response.content)
-
-        # Map back to criterion IDs
-        scores = {}
-        for c in criteria:
-            for score_entry in parsed.get("scores", []):
-                if score_entry.get("criterion") == c.name:
-                    scores[str(c.id)] = {
-                        "score": score_entry.get("score"),
-                        "max_score": score_entry.get("max_score", c.max_score),
-                        "feedback": score_entry.get("feedback"),
-                    }
-                    break
-
-        return scores, raw_response
+        return self._map_scores(parsed, criteria), raw_response
 
 
 def create_scorer(session: AsyncSession) -> Scorer:

@@ -1,46 +1,73 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import RecordingControls, { useAudioRecording } from '../../components/RecordingControls'
 
-// Simple playback component that works around Chrome WebM duration-metadata bug
+// Playback component for just-recorded WebM blobs — Chrome lacks duration metadata.
 function RecordingPlayback({ src, recordedDuration }: { src?: string; recordedDuration: number }) {
   const audioRef = useRef<HTMLAudioElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
+  const isDragging = useRef(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [realDuration, setRealDuration] = useState(recordedDuration)
   const [isPlaying, setIsPlaying] = useState(false)
 
-  // Seek-to-end trick: Chrome WebM blobs lack duration metadata; seeking far ahead forces the
-  // browser to scan the file and populate audio.duration correctly.
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !src) return
+    setCurrentTime(0)
+    setRealDuration(recordedDuration)
+    setIsPlaying(false)
+    isDragging.current = false
+
     const onLoaded = () => {
-      if (isFinite(audio.duration) && audio.duration > 0) {
-        setRealDuration(audio.duration)
-      } else {
-        audio.currentTime = 1e9
-      }
+      if (isFinite(audio.duration) && audio.duration > 0) setRealDuration(audio.duration)
+      else audio.currentTime = 1e9
     }
     const onSeeked = () => {
       if (isFinite(audio.duration) && audio.duration > 0) {
-        setRealDuration(audio.duration)
-        audio.currentTime = 0
+        setRealDuration(d => { if (d === recordedDuration) { audio.currentTime = 0; return audio.duration } return d })
       }
     }
     audio.addEventListener('loadedmetadata', onLoaded)
     audio.addEventListener('seeked', onSeeked)
-    return () => {
-      audio.removeEventListener('loadedmetadata', onLoaded)
-      audio.removeEventListener('seeked', onSeeked)
+    return () => { audio.removeEventListener('loadedmetadata', onLoaded); audio.removeEventListener('seeked', onSeeked) }
+  }, [src, recordedDuration])
+
+  const getRatio = useCallback((clientX: number) => {
+    const bar = barRef.current
+    if (!bar) return 0
+    const rect = bar.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+  }, [])
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!isDragging.current || !audioRef.current || realDuration === 0) return
+      const t = getRatio(e.clientX) * realDuration
+      audioRef.current.currentTime = t
+      setCurrentTime(t)
     }
-  }, [src])
+    const onUp = () => { isDragging.current = false }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [realDuration, getRatio])
+
+  const onBarMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    isDragging.current = true
+    if (!audioRef.current || realDuration === 0) return
+    const t = getRatio(e.clientX) * realDuration
+    audioRef.current.currentTime = t
+    setCurrentTime(t)
+  }
 
   const fmt = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`
   const progress = realDuration > 0 ? (currentTime / realDuration) * 100 : 0
 
   return (
-    <div className="bg-gray-50 rounded-lg p-4">
+    <div className="bg-gray-50 rounded-lg p-4 select-none">
       <audio ref={audioRef} src={src}
-        onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
+        onTimeUpdate={() => { if (!isDragging.current && audioRef.current) setCurrentTime(audioRef.current.currentTime) }}
         onEnded={() => setIsPlaying(false)} />
       <div className="flex items-center gap-3">
         <button onClick={() => { isPlaying ? audioRef.current?.pause() : audioRef.current?.play(); setIsPlaying(p => !p) }}
@@ -50,8 +77,8 @@ function RecordingPlayback({ src, recordedDuration }: { src?: string; recordedDu
             : <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>}
         </button>
         <div className="flex-1">
-          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+          <div ref={barRef} className="h-2 bg-gray-200 rounded-full overflow-hidden cursor-pointer" onMouseDown={onBarMouseDown}>
+            <div className="h-full bg-blue-500 rounded-full pointer-events-none" style={{ width: `${progress}%` }} />
           </div>
           <div className="flex justify-between text-xs text-gray-400 mt-1">
             <span>{fmt(currentTime)}</span>
