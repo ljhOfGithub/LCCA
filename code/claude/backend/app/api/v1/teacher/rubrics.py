@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.security import get_current_user, require_teacher
+from app.core.auth_helpers import get_or_create_teacher_profile, assert_can_modify_scenario
 from app.db.session import get_session
 from app.models.rubric import Criterion, Rubric
 from app.models.scenario import Task
@@ -66,40 +67,13 @@ class RubricResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
-    """Get teacher's profile, raising 404 if not found."""
+async def _get_task(task_id: UUID, session: AsyncSession) -> Task:
     result = await session.execute(
-        select(Teacher).where(Teacher.user_id == user.id)
-    )
-    teacher = result.scalar_one_or_none()
-
-    if not teacher:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not a teacher",
-        )
-
-    return teacher
-
-
-async def verify_teacher_owns_task(task_id: UUID, teacher_id: UUID, session: AsyncSession) -> Task:
-    """Verify the task belongs to a scenario created by this teacher."""
-    result = await session.execute(
-        select(Task)
-        .options(selectinload(Task.scenario))
-        .where(Task.id == task_id)
+        select(Task).options(selectinload(Task.scenario)).where(Task.id == task_id)
     )
     task = result.scalar_one_or_none()
-
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    if task.scenario.created_by_id != teacher_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to manage this task's rubric",
-        )
-
     return task
 
 
@@ -108,16 +82,19 @@ async def list_rubrics(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_teacher()),
 ):
-    """List all rubrics created by the current teacher."""
-    teacher = await get_teacher_profile(current_user, session)
+    """List rubrics. Admin sees all; teacher sees own scenarios only."""
+    teacher = await get_or_create_teacher_profile(current_user, session)
 
-    result = await session.execute(
+    query = (
         select(Rubric)
         .options(selectinload(Rubric.criteria), selectinload(Rubric.task))
         .join(Task)
-        .where(Task.scenario.has(created_by_id=teacher.id))
         .order_by(Rubric.created_at.desc())
     )
+    if not current_user.is_superuser:
+        query = query.where(Task.scenario.has(created_by_id=teacher.id))
+
+    result = await session.execute(query)
     rubrics = result.scalars().all()
 
     return [
@@ -149,10 +126,9 @@ async def create_rubric(
     current_user: User = Depends(require_teacher()),
 ):
     """Create a new rubric for a task."""
-    teacher = await get_teacher_profile(current_user, session)
-
-    # Verify teacher owns the task
-    task = await verify_teacher_owns_task(rubric_data.task_id, teacher.id, session)
+    teacher = await get_or_create_teacher_profile(current_user, session)
+    task = await _get_task(rubric_data.task_id, session)
+    assert_can_modify_scenario(current_user, task.scenario.created_by_id, teacher.id)
 
     # Check if rubric already exists for this task
     existing = await session.execute(
@@ -212,11 +188,11 @@ async def update_rubric(
     current_user: User = Depends(require_teacher()),
 ):
     """Update a rubric's name."""
-    teacher = await get_teacher_profile(current_user, session)
+    teacher = await get_or_create_teacher_profile(current_user, session)
 
     result = await session.execute(
         select(Rubric)
-        .options(selectinload(Rubric.criteria), selectinload(Rubric.task))
+        .options(selectinload(Rubric.criteria), selectinload(Rubric.task).selectinload(Task.scenario))
         .where(Rubric.id == rubric_id)
     )
     rubric = result.scalar_one_or_none()
@@ -224,12 +200,7 @@ async def update_rubric(
     if not rubric:
         raise HTTPException(status_code=404, detail="Rubric not found")
 
-    # Check ownership
-    if rubric.task.scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to update this rubric",
-        )
+    assert_can_modify_scenario(current_user, rubric.task.scenario.created_by_id, teacher.id)
 
     if rubric_data.name is not None:
         rubric.name = rubric_data.name
@@ -262,11 +233,11 @@ async def delete_rubric(
     current_user: User = Depends(require_teacher()),
 ):
     """Delete a rubric and all its criteria."""
-    teacher = await get_teacher_profile(current_user, session)
+    teacher = await get_or_create_teacher_profile(current_user, session)
 
     result = await session.execute(
         select(Rubric)
-        .options(selectinload(Rubric.task))
+        .options(selectinload(Rubric.task).selectinload(Task.scenario))
         .where(Rubric.id == rubric_id)
     )
     rubric = result.scalar_one_or_none()
@@ -274,12 +245,7 @@ async def delete_rubric(
     if not rubric:
         raise HTTPException(status_code=404, detail="Rubric not found")
 
-    # Check ownership
-    if rubric.task.scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this rubric",
-        )
+    assert_can_modify_scenario(current_user, rubric.task.scenario.created_by_id, teacher.id)
 
     await session.delete(rubric)
     await session.commit()
@@ -293,11 +259,11 @@ async def add_criterion(
     current_user: User = Depends(require_teacher()),
 ):
     """Add a new criterion to a rubric."""
-    teacher = await get_teacher_profile(current_user, session)
+    teacher = await get_or_create_teacher_profile(current_user, session)
 
     result = await session.execute(
         select(Rubric)
-        .options(selectinload(Rubric.task))
+        .options(selectinload(Rubric.task).selectinload(Task.scenario))
         .where(Rubric.id == rubric_id)
     )
     rubric = result.scalar_one_or_none()
@@ -305,12 +271,7 @@ async def add_criterion(
     if not rubric:
         raise HTTPException(status_code=404, detail="Rubric not found")
 
-    # Check ownership
-    if rubric.task.scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to modify this rubric",
-        )
+    assert_can_modify_scenario(current_user, rubric.task.scenario.created_by_id, teacher.id)
 
     criterion = Criterion(
         rubric_id=rubric.id,
@@ -342,11 +303,11 @@ async def update_criterion(
     current_user: User = Depends(require_teacher()),
 ):
     """Update a criterion."""
-    teacher = await get_teacher_profile(current_user, session)
+    teacher = await get_or_create_teacher_profile(current_user, session)
 
     result = await session.execute(
         select(Criterion)
-        .options(selectinload(Criterion.rubric).selectinload(Rubric.task))
+        .options(selectinload(Criterion.rubric).selectinload(Rubric.task).selectinload(Task.scenario))
         .where(Criterion.id == criterion_id)
     )
     criterion = result.scalar_one_or_none()
@@ -354,12 +315,7 @@ async def update_criterion(
     if not criterion:
         raise HTTPException(status_code=404, detail="Criterion not found")
 
-    # Check ownership
-    if criterion.rubric.task.scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to update this criterion",
-        )
+    assert_can_modify_scenario(current_user, criterion.rubric.task.scenario.created_by_id, teacher.id)
 
     # Update fields
     if criterion_data.name is not None:
@@ -393,11 +349,11 @@ async def delete_criterion(
     current_user: User = Depends(require_teacher()),
 ):
     """Delete a criterion."""
-    teacher = await get_teacher_profile(current_user, session)
+    teacher = await get_or_create_teacher_profile(current_user, session)
 
     result = await session.execute(
         select(Criterion)
-        .options(selectinload(Criterion.rubric).selectinload(Rubric.task))
+        .options(selectinload(Criterion.rubric).selectinload(Rubric.task).selectinload(Task.scenario))
         .where(Criterion.id == criterion_id)
     )
     criterion = result.scalar_one_or_none()
@@ -406,11 +362,7 @@ async def delete_criterion(
         raise HTTPException(status_code=404, detail="Criterion not found")
 
     # Check ownership
-    if criterion.rubric.task.scenario.created_by_id != teacher.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this criterion",
-        )
+    assert_can_modify_scenario(current_user, criterion.rubric.task.scenario.created_by_id, teacher.id)
 
     await session.delete(criterion)
     await session.commit()

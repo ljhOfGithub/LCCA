@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.security import get_current_user, require_teacher
+from app.core.security import get_current_user, require_teacher, require_admin
 from app.core.status import ScenarioStatus, TaskType
 from app.db.session import get_session
 from app.models.scenario import Material, Scenario, Task
@@ -61,6 +61,7 @@ class TaskResponse(BaseModel):
     task_type: TaskType
     sequence_order: int
     time_limit_seconds: int | None
+    weight: float = 1.0
     materials: List[MaterialResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
@@ -100,6 +101,7 @@ def _task_response(t: Task) -> TaskResponse:
         task_type=t.task_type,
         sequence_order=t.sequence_order,
         time_limit_seconds=t.time_limit_seconds,
+        weight=getattr(t, 'weight', 1.0),
         materials=[
             MaterialResponse(
                 id=str(m.id),
@@ -132,6 +134,13 @@ async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
     result = await session.execute(select(Teacher).where(Teacher.user_id == user.id))
     teacher = result.scalar_one_or_none()
     if not teacher:
+        if user.is_superuser:
+            # Auto-create a teacher profile for admin users so they can own scenarios
+            teacher = Teacher(user_id=user.id)
+            session.add(teacher)
+            await session.flush()
+            await session.refresh(teacher)
+            return teacher
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a teacher")
     return teacher
 
@@ -154,14 +163,12 @@ async def list_published_scenarios(
 @router.get("/scenarios", response_model=List[ScenarioResponse])
 async def list_scenarios(
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
-    """List all scenarios created by the current teacher."""
-    teacher = await get_teacher_profile(current_user, session)
+    """List all scenarios (admin sees all)."""
     result = await session.execute(
         select(Scenario)
         .options(_TASKS_WITH_MATERIALS)
-        .where(Scenario.created_by_id == teacher.id)
         .order_by(Scenario.created_at.desc())
     )
     return [_scenario_response(s) for s in result.scalars().all()]
@@ -171,7 +178,7 @@ async def list_scenarios(
 async def create_scenario(
     scenario_data: ScenarioCreate,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Create a new scenario."""
     teacher = await get_teacher_profile(current_user, session)
@@ -216,10 +223,9 @@ async def update_scenario(
     scenario_id: UUID,
     scenario_data: ScenarioUpdate,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Update a scenario."""
-    teacher = await get_teacher_profile(current_user, session)
     result = await session.execute(
         select(Scenario)
         .options(_TASKS_WITH_MATERIALS)
@@ -228,9 +234,11 @@ async def update_scenario(
     scenario = result.scalar_one_or_none()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if scenario.created_by_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="You do not have permission to update this scenario")
+    if not current_user.is_superuser:
+        teacher = await get_teacher_profile(current_user, session)
+        if scenario.created_by_id != teacher.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="You do not have permission to update this scenario")
 
     if scenario_data.title is not None:
         scenario.title = scenario_data.title
@@ -252,17 +260,18 @@ async def update_scenario(
 async def delete_scenario(
     scenario_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Delete a scenario and all its tasks."""
-    teacher = await get_teacher_profile(current_user, session)
     result = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     scenario = result.scalar_one_or_none()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if scenario.created_by_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="You do not have permission to delete this scenario")
+    if not current_user.is_superuser:
+        teacher = await get_teacher_profile(current_user, session)
+        if scenario.created_by_id != teacher.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="You do not have permission to delete this scenario")
     if scenario.attempts:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Cannot delete scenario with existing attempts")
@@ -313,17 +322,18 @@ async def add_task(
     scenario_id: UUID,
     task_data: TaskCreate,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Add a new task to a scenario."""
-    teacher = await get_teacher_profile(current_user, session)
     result = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     scenario = result.scalar_one_or_none()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if scenario.created_by_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="You do not have permission to add tasks to this scenario")
+    if not current_user.is_superuser:
+        teacher = await get_teacher_profile(current_user, session)
+        if scenario.created_by_id != teacher.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="You do not have permission to add tasks to this scenario")
     if scenario.status != ScenarioStatus.DRAFT:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Can only add tasks to draft scenarios")

@@ -1,34 +1,26 @@
-"""Teacher review endpoints: view student attempts + edit AI scores."""
+"""Teacher / Admin review endpoints: view student attempts + edit AI scores."""
 from typing import Annotated
 from uuid import UUID
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from app.core.security import require_teacher
 from app.db.session import get_session
-from app.models.user import Teacher, User
+from app.models.user import Teacher, User, Student
 from app.models.attempt import Attempt, AttemptStatus
 from app.models.scenario import Scenario, Task
 from app.models.scoring import ScoreRun, ScoreDetail, AttemptResult
-from app.core.status import ScoreRunStatus
+from app.core.auth_helpers import get_or_create_teacher_profile
 
 router = APIRouter()
 
 
-async def _get_teacher(user: User, session: AsyncSession) -> Teacher:
-    r = await session.execute(select(Teacher).where(Teacher.user_id == user.id))
-    t = r.scalar_one_or_none()
-    if not t:
-        raise HTTPException(403, "Teacher profile not found")
-    return t
-
-
-# ── List attempts for a scenario ───────────────────────────────────────────────
+# ── List attempts for a scenario (all teachers can see all scenarios) ──────────
 
 class AttemptSummary(BaseModel):
     id: str
@@ -41,6 +33,10 @@ class AttemptSummary(BaseModel):
     cefr_level: str | None
     overall_score: float | None
     overall_score_max: float | None
+    student_id: str | None
+    student_number: str | None
+    student_name: str | None
+    student_email: str | None
 
 
 @router.get("/scenarios/{scenario_id}/attempts", response_model=list[AttemptSummary])
@@ -48,22 +44,41 @@ async def list_scenario_attempts(
     scenario_id: UUID,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_teacher()),
+    student_number: str | None = Query(default=None, description="Filter by student number (partial match)"),
+    student_name: str | None = Query(default=None, description="Filter by student name (partial match)"),
+    status_filter: str | None = Query(default=None, alias="status", description="Filter by attempt status"),
 ):
-    """List all attempts for a given scenario (any status)."""
-    teacher = await _get_teacher(current_user, session)
-
-    # Verify teacher owns this scenario
+    """List all attempts for a scenario. Teachers see all attempts (not just own scenarios)."""
+    # Scenario must exist (but no ownership check — all teachers can review all)
     sc_r = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     sc = sc_r.scalar_one_or_none()
-    if not sc or sc.created_by_id != teacher.id:
-        raise HTTPException(403, "Not your scenario")
+    if not sc:
+        raise HTTPException(404, "Scenario not found")
 
-    attempts_r = await session.execute(
+    query = (
         select(Attempt)
+        .join(Student, Attempt.student_id == Student.id)
+        .join(User, Student.user_id == User.id)
         .where(Attempt.scenario_id == scenario_id)
-        .order_by(Attempt.created_at.desc())
+        .options(
+            selectinload(Attempt.student).selectinload(Student.user)
+        )
     )
+
+    if student_number:
+        query = query.where(Student.student_number.ilike(f"%{student_number}%"))
+    if student_name:
+        query = query.where(User.full_name.ilike(f"%{student_name}%"))
+    if status_filter:
+        query = query.where(Attempt.status == status_filter)
+
+    query = query.order_by(Attempt.created_at.desc())
+
+    attempts_r = await session.execute(query)
     attempts = attempts_r.scalars().all()
+
+    if not attempts:
+        return []
 
     results_r = await session.execute(
         select(AttemptResult).where(
@@ -84,12 +99,16 @@ async def list_scenario_attempts(
             cefr_level=results_by_attempt[a.id].cefr_level if a.id in results_by_attempt else None,
             overall_score=results_by_attempt[a.id].overall_score if a.id in results_by_attempt else None,
             overall_score_max=results_by_attempt[a.id].overall_score_max if a.id in results_by_attempt else None,
+            student_id=str(a.student_id) if a.student_id else None,
+            student_number=a.student.student_number if a.student else None,
+            student_name=a.student.user.full_name if a.student and a.student.user else None,
+            student_email=a.student.user.email if a.student and a.student.user else None,
         )
         for a in attempts
     ]
 
 
-# ── Full attempt detail (responses + scores) ───────────────────────────────────
+# ── Full attempt detail ────────────────────────────────────────────────────────
 
 class CriterionDetail(BaseModel):
     detail_id: str
@@ -127,6 +146,9 @@ class AttemptDetail(BaseModel):
     band_score: float | None
     teacher_notes: str | None
     is_finalized: bool
+    student_number: str | None
+    student_name: str | None
+    student_email: str | None
     tasks: list[TaskDetail]
 
 
@@ -136,21 +158,18 @@ async def get_attempt_detail(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_teacher()),
 ):
-    """Full attempt detail including student responses and AI scores."""
-    teacher = await _get_teacher(current_user, session)
-
+    """Full attempt detail including student responses and AI scores. No ownership restriction."""
     attempt_r = await session.execute(
-        select(Attempt).options(selectinload(Attempt.task_responses)).where(Attempt.id == attempt_id)
+        select(Attempt)
+        .options(
+            selectinload(Attempt.task_responses),
+            selectinload(Attempt.student).selectinload(Student.user),
+        )
+        .where(Attempt.id == attempt_id)
     )
     attempt = attempt_r.scalar_one_or_none()
     if not attempt:
         raise HTTPException(404, "Attempt not found")
-
-    # Verify teacher owns the scenario
-    sc_r = await session.execute(select(Scenario).where(Scenario.id == attempt.scenario_id))
-    sc = sc_r.scalar_one_or_none()
-    if not sc or sc.created_by_id != teacher.id:
-        raise HTTPException(403, "Not your scenario")
 
     tasks_r = await session.execute(
         select(Task).where(Task.scenario_id == attempt.scenario_id).order_by(Task.sequence_order)
@@ -163,7 +182,12 @@ async def get_attempt_detail(
     import json
     task_details: list[TaskDetail] = []
 
-    for tr in sorted(attempt.task_responses, key=lambda r: tasks[str(r.task_id)].sequence_order if str(r.task_id) in tasks else 99):
+    sorted_responses = sorted(
+        attempt.task_responses,
+        key=lambda r: tasks[str(r.task_id)].sequence_order if str(r.task_id) in tasks else 99
+    )
+
+    for tr in sorted_responses:
         task = tasks.get(str(tr.task_id))
         if not task:
             continue
@@ -214,7 +238,7 @@ async def get_attempt_detail(
             task_title=task.title,
             content=tr.content,
             score_run_id=str(latest.id),
-            cefr_level=raw.get("cefr_level", "B1"),
+            cefr_level=raw.get("cefr_level", "—"),
             overall_feedback=raw.get("overall_feedback", ""),
             transcript=raw.get("transcript"),
             criteria=[
@@ -234,6 +258,7 @@ async def get_attempt_detail(
             total_max=total_max,
         ))
 
+    student = attempt.student
     return AttemptDetail(
         id=str(attempt.id),
         status=attempt.status.value,
@@ -245,6 +270,9 @@ async def get_attempt_detail(
         band_score=ar.band_score if ar else None,
         teacher_notes=ar.teacher_notes if ar else None,
         is_finalized=ar.is_finalized if ar else False,
+        student_number=student.student_number if student else None,
+        student_name=student.user.full_name if student and student.user else None,
+        student_email=student.user.email if student and student.user else None,
         tasks=task_details,
     )
 
@@ -308,17 +336,10 @@ async def finalize_attempt(
     current_user: User = Depends(require_teacher()),
 ):
     """Teacher finalizes the result (locks it and optionally overrides CEFR level)."""
-    teacher = await _get_teacher(current_user, session)
-
     attempt_r = await session.execute(select(Attempt).where(Attempt.id == attempt_id))
     attempt = attempt_r.scalar_one_or_none()
     if not attempt:
         raise HTTPException(404, "Attempt not found")
-
-    sc_r = await session.execute(select(Scenario).where(Scenario.id == attempt.scenario_id))
-    sc = sc_r.scalar_one_or_none()
-    if not sc or sc.created_by_id != teacher.id:
-        raise HTTPException(403, "Not your scenario")
 
     ar_r = await session.execute(select(AttemptResult).where(AttemptResult.attempt_id == attempt_id))
     ar = ar_r.scalar_one_or_none()

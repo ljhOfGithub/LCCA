@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.security import get_current_user, require_teacher
+from app.core.security import get_current_user, require_admin
+from app.core.auth_helpers import get_or_create_teacher_profile as _get_or_create_teacher
 from app.core.status import TaskType
 from app.db.session import get_session
 from app.models.scenario import Material, Task
@@ -25,6 +26,7 @@ class TaskUpdate(BaseModel):
     task_type: TaskType | None = None
     sequence_order: int | None = Field(None, ge=0)
     time_limit_seconds: int | None = Field(None, gt=0)
+    weight: float | None = Field(None, gt=0)
 
 
 class TaskResponse(BaseModel):
@@ -35,6 +37,7 @@ class TaskResponse(BaseModel):
     task_type: TaskType
     sequence_order: int
     time_limit_seconds: int | None
+    weight: float = 1.0
 
     model_config = {"from_attributes": True}
 
@@ -65,23 +68,22 @@ class MaterialResponse(BaseModel):
 
 
 async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
-    """Get teacher's profile, raising 403 if not found."""
-    result = await session.execute(
-        select(Teacher).where(Teacher.user_id == user.id)
-    )
+    """Get teacher's profile; auto-creates one for superusers."""
+    result = await session.execute(select(Teacher).where(Teacher.user_id == user.id))
     teacher = result.scalar_one_or_none()
-
     if not teacher:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not a teacher",
-        )
-
+        if user.is_superuser:
+            teacher = Teacher(user_id=user.id)
+            session.add(teacher)
+            await session.flush()
+            await session.refresh(teacher)
+            return teacher
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a teacher")
     return teacher
 
 
-async def verify_teacher_owns_task(task_id: UUID, teacher_id: UUID, session: AsyncSession) -> Task:
-    """Verify the task belongs to a scenario created by this teacher."""
+async def verify_teacher_owns_task(task_id: UUID, teacher_id: UUID, session: AsyncSession, user: User | None = None) -> Task:
+    """Verify the task belongs to a scenario created by this teacher. Admin skips ownership check."""
     result = await session.execute(
         select(Task)
         .options(selectinload(Task.scenario))
@@ -91,6 +93,9 @@ async def verify_teacher_owns_task(task_id: UUID, teacher_id: UUID, session: Asy
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    if user and user.is_superuser:
+        return task
 
     if task.scenario.created_by_id != teacher_id:
         raise HTTPException(
@@ -105,7 +110,7 @@ async def verify_teacher_owns_task(task_id: UUID, teacher_id: UUID, session: Asy
 async def list_tasks(
     scenario_id: UUID | None = None,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """List tasks, optionally filtered by scenario."""
     teacher = await get_teacher_profile(current_user, session)
@@ -139,11 +144,11 @@ async def list_tasks(
 async def get_task(
     task_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Get a specific task by ID."""
     teacher = await get_teacher_profile(current_user, session)
-    task = await verify_teacher_owns_task(task_id, teacher.id, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session, current_user)
 
     return TaskResponse(
         id=str(task.id),
@@ -161,11 +166,11 @@ async def update_task(
     task_id: UUID,
     task_data: TaskUpdate,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Update a task."""
     teacher = await get_teacher_profile(current_user, session)
-    task = await verify_teacher_owns_task(task_id, teacher.id, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session, current_user)
 
     if task_data.title is not None:
         task.title = task_data.title
@@ -177,6 +182,8 @@ async def update_task(
         task.sequence_order = task_data.sequence_order
     if task_data.time_limit_seconds is not None:
         task.time_limit_seconds = task_data.time_limit_seconds
+    if task_data.weight is not None:
+        task.weight = task_data.weight
 
     await session.commit()
 
@@ -188,6 +195,7 @@ async def update_task(
         task_type=task.task_type,
         sequence_order=task.sequence_order,
         time_limit_seconds=task.time_limit_seconds,
+        weight=task.weight,
     )
 
 
@@ -195,11 +203,11 @@ async def update_task(
 async def delete_task(
     task_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Delete a task and its materials."""
     teacher = await get_teacher_profile(current_user, session)
-    task = await verify_teacher_owns_task(task_id, teacher.id, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session, current_user)
 
     # Check if task has responses
     if task.task_responses:
@@ -219,14 +227,14 @@ async def upload_audio_material(
     task_id: UUID,
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Upload an audio file (MP3/WAV/WebM) and attach it as a material to a task."""
     from app.core.config import settings
     import boto3, uuid as uuid_lib, asyncio, os
 
     teacher = await get_teacher_profile(current_user, session)
-    task = await verify_teacher_owns_task(task_id, teacher.id, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session, current_user)
 
     # Accept any audio content type
     allowed_types = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/webm", "audio/ogg", "audio/mp4"}
@@ -283,16 +291,92 @@ async def upload_audio_material(
     )
 
 
+@router.post("/tasks/{task_id}/materials/upload-document", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
+async def upload_document_material(
+    task_id: UUID,
+    file: UploadFile = File(...),
+    material_type: str = "resume",
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_admin()),
+):
+    """Upload a PDF or DOCX file and attach it as a material to a task."""
+    from app.core.config import settings
+    import boto3, uuid as uuid_lib, asyncio, os
+
+    teacher = await get_teacher_profile(current_user, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session, current_user)
+
+    allowed_types = {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    }
+    ct = (file.content_type or "").split(";")[0]
+    if ct and ct not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}. Only PDF and DOCX are accepted.")
+
+    filename = file.filename or "document"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "pdf"
+    storage_key = f"materials/{task_id}/{uuid_lib.uuid4()}.{ext}"
+    content_bytes = await file.read()
+
+    def do_upload():
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+        )
+        s3.put_object(
+            Bucket=settings.s3_bucket,
+            Key=storage_key,
+            Body=content_bytes,
+            ContentType=ct or "application/octet-stream",
+        )
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, do_upload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Storage upload failed: {e}")
+
+    public_endpoint = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
+    public_url = f"{public_endpoint}/{settings.s3_bucket}/{storage_key}"
+
+    import json as _json
+    meta = _json.dumps({"filename": filename})
+
+    material = Material(
+        task_id=task.id,
+        material_type=material_type,
+        content=public_url,
+        storage_key=storage_key,
+        metadata_json=meta,
+    )
+    session.add(material)
+    await session.commit()
+
+    return MaterialResponse(
+        id=str(material.id),
+        task_id=str(material.task_id),
+        material_type=material.material_type,
+        content=material.content,
+        storage_key=material.storage_key,
+        metadata_json=material.metadata_json,
+    )
+
+
 @router.post("/tasks/{task_id}/materials", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
 async def add_material(
     task_id: UUID,
     material_data: MaterialCreate,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Add a material to a task."""
     teacher = await get_teacher_profile(current_user, session)
-    task = await verify_teacher_owns_task(task_id, teacher.id, session)
+    task = await verify_teacher_owns_task(task_id, teacher.id, session, current_user)
 
     material = Material(
         task_id=task.id,
@@ -319,7 +403,7 @@ async def update_material(
     material_id: UUID,
     material_data: MaterialUpdate,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Update a material."""
     teacher = await get_teacher_profile(current_user, session)
@@ -365,7 +449,7 @@ async def update_material(
 async def delete_material(
     material_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_teacher()),
+    current_user: User = Depends(require_admin()),
 ):
     """Delete a material."""
     teacher = await get_teacher_profile(current_user, session)

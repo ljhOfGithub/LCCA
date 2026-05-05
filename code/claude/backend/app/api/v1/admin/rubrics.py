@@ -1,239 +1,214 @@
-"""Rubric and criterion management endpoints.
-
-OpenAPI contract:
-- GET /api/v1/admin/rubrics - List rubrics
-- POST /api/v1/admin/rubrics - Create rubric
-- GET /api/v1/admin/rubrics/{id} - Get rubric details
-- PATCH /api/v1/admin/rubrics/{id} - Update rubric
-- DELETE /api/v1/admin/rubrics/{id} - Delete rubric
-- POST /api/v1/admin/rubrics/{id}/criteria - Add criterion
-- PATCH /api/v1/admin/criteria/{id} - Update criterion
-- DELETE /api/v1/admin/criteria/{id} - Delete criterion
-"""
+"""Rubric and criterion management — admin only."""
+import json
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.db.session import get_session
 from app.models.rubric import Rubric, Criterion
-from app.api.schemas.scenarios import (
-    RubricResponse,
-    RubricCriterion,
-    RubricCreate,
-    CriterionCreate,
-)
-from app.core.security import require_teacher
+from app.core.security import require_admin
 
 router = APIRouter()
 
+CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
-@router.get("/rubrics", response_model=list[RubricResponse])
+
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+class CriterionIn(BaseModel):
+    name: str
+    description: str | None = None
+    domain: str | None = None
+    competence: str | None = None
+    max_score: float = 5.0
+    weight: float = 1.0
+    cefr_descriptors: dict | None = None  # {"A1": "...", "B1": "...", ...}
+
+
+class CriterionOut(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    domain: str | None
+    competence: str | None
+    max_score: float
+    weight: float
+    sequence_order: int
+    cefr_descriptors: dict | None
+
+
+class RubricIn(BaseModel):
+    task_id: str
+    name: str
+
+
+class RubricOut(BaseModel):
+    id: str
+    task_id: str
+    name: str
+    criteria: list[CriterionOut]
+
+
+def _criterion_out(c: Criterion) -> CriterionOut:
+    descs = None
+    if c.cefr_descriptors:
+        try:
+            descs = json.loads(c.cefr_descriptors)
+        except Exception:
+            pass
+    return CriterionOut(
+        id=str(c.id),
+        name=c.name,
+        description=c.description,
+        domain=c.domain,
+        competence=c.competence,
+        max_score=c.max_score,
+        weight=c.weight,
+        sequence_order=c.sequence_order,
+        cefr_descriptors=descs,
+    )
+
+
+def _rubric_out(r: Rubric) -> RubricOut:
+    return RubricOut(
+        id=str(r.id),
+        task_id=str(r.task_id),
+        name=r.name,
+        criteria=sorted([_criterion_out(c) for c in (r.criteria or [])], key=lambda x: x.sequence_order),
+    )
+
+
+# ── Rubric CRUD ────────────────────────────────────────────────────────────────
+
+@router.get("/rubrics", response_model=list[RubricOut])
 async def list_rubrics(
     session: AsyncSession = Depends(get_session),
-    current_user: Annotated = Depends(require_teacher()),
-    task_id: UUID | None = Query(default=None, description="Filter by task ID"),
-) -> list[RubricResponse]:
-    """List all rubrics.
-
-    Teachers see their rubrics. Admins see all.
-    """
-    query = select(Rubric)
-
-    if task_id:
-        query = query.where(Rubric.task_id == task_id)
-
-    result = await session.execute(query)
-    rubrics = result.scalars().all()
-
-    return [
-        RubricResponse(
-            id=r.id,
-            task_id=r.task_id,
-            criteria=[
-                RubricCriterion(
-                    name=c.name,
-                    description=c.description or "",
-                    max_score=c.max_score,
-                    levels={},  # TODO: Add levels
-                )
-                for c in (r.criteria or [])
-            ],
-        )
-        for r in rubrics
-    ]
+    _: Annotated = Depends(require_admin()),
+):
+    result = await session.execute(select(Rubric).options(selectinload(Rubric.criteria)))
+    return [_rubric_out(r) for r in result.scalars().all()]
 
 
-@router.post("/rubrics", response_model=RubricResponse, status_code=201)
+@router.post("/rubrics", response_model=RubricOut, status_code=201)
 async def create_rubric(
-    data: RubricCreate,
+    data: RubricIn,
     session: AsyncSession = Depends(get_session),
-    current_user: Annotated = Depends(require_teacher()),
-) -> RubricResponse:
-    """Create a new rubric for a task."""
+    _: Annotated = Depends(require_admin()),
+):
     from app.models.scenario import Task
-
-    # Verify task exists
-    task_result = await session.execute(
-        select(Task).where(Task.id == data.task_id)
-    )
-    task = task_result.scalar_one_or_none()
-
+    task = (await session.execute(select(Task).where(Task.id == data.task_id))).scalar_one_or_none()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(404, "Task not found")
 
-    # Check if rubric already exists for this task
-    existing = await session.execute(
-        select(Rubric).where(Rubric.task_id == data.task_id)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=400,
-            detail="Rubric already exists for this task"
-        )
+    existing = (await session.execute(select(Rubric).where(Rubric.task_id == data.task_id))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, "Rubric already exists for this task")
 
-    rubric = Rubric(
-        task_id=data.task_id,
-        name=data.name,
-    )
+    rubric = Rubric(task_id=data.task_id, name=data.name)
     session.add(rubric)
     await session.flush()
     await session.refresh(rubric)
-
-    return RubricResponse(
-        id=rubric.id,
-        task_id=rubric.task_id,
-        criteria=[],
-    )
+    return _rubric_out(rubric)
 
 
-@router.get("/rubrics/{rubric_id}", response_model=RubricResponse)
+@router.get("/rubrics/{rubric_id}", response_model=RubricOut)
 async def get_rubric(
     rubric_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: Annotated = Depends(require_teacher()),
-) -> RubricResponse:
-    """Get rubric details with criteria."""
-    result = await session.execute(
-        select(Rubric).where(Rubric.id == rubric_id)
-    )
-    rubric = result.scalar_one_or_none()
-
-    if not rubric:
-        raise HTTPException(status_code=404, detail="Rubric not found")
-
-    return RubricResponse(
-        id=rubric.id,
-        task_id=rubric.task_id,
-        criteria=[
-            RubricCriterion(
-                name=c.name,
-                description=c.description or "",
-                max_score=c.max_score,
-                levels={},  # TODO: Add levels
-            )
-            for c in (rubric.criteria or [])
-        ],
-    )
+    _: Annotated = Depends(require_admin()),
+):
+    r = (await session.execute(
+        select(Rubric).options(selectinload(Rubric.criteria)).where(Rubric.id == rubric_id)
+    )).scalar_one_or_none()
+    if not r:
+        raise HTTPException(404, "Rubric not found")
+    return _rubric_out(r)
 
 
-@router.post("/rubrics/{rubric_id}/criteria", status_code=201)
+@router.delete("/rubrics/{rubric_id}", status_code=204)
+async def delete_rubric(
+    rubric_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    _: Annotated = Depends(require_admin()),
+):
+    r = (await session.execute(select(Rubric).where(Rubric.id == rubric_id))).scalar_one_or_none()
+    if not r:
+        raise HTTPException(404, "Rubric not found")
+    await session.delete(r)
+    await session.commit()
+
+
+# ── Criterion CRUD ─────────────────────────────────────────────────────────────
+
+@router.post("/rubrics/{rubric_id}/criteria", response_model=CriterionOut, status_code=201)
 async def add_criterion(
     rubric_id: UUID,
-    data: CriterionCreate,
+    data: CriterionIn,
     session: AsyncSession = Depends(get_session),
-    current_user: Annotated = Depends(require_teacher()),
-) -> dict:
-    """Add a criterion to a rubric."""
-    result = await session.execute(
-        select(Rubric).where(Rubric.id == rubric_id)
-    )
-    rubric = result.scalar_one_or_none()
+    _: Annotated = Depends(require_admin()),
+):
+    r = (await session.execute(select(Rubric).where(Rubric.id == rubric_id))).scalar_one_or_none()
+    if not r:
+        raise HTTPException(404, "Rubric not found")
 
-    if not rubric:
-        raise HTTPException(status_code=404, detail="Rubric not found")
+    max_order = (await session.execute(
+        select(Criterion.sequence_order).where(Criterion.rubric_id == rubric_id)
+        .order_by(Criterion.sequence_order.desc()).limit(1)
+    )).scalar_one_or_none() or -1
 
-    # Get next sequence order
-    max_order_result = await session.execute(
-        select(Criterion.sequence_order)
-        .where(Criterion.rubric_id == rubric_id)
-        .order_by(Criterion.sequence_order.desc())
-        .limit(1)
-    )
-    max_order = max_order_result.scalar_one_or_none() or -1
-
-    criterion = Criterion(
+    c = Criterion(
         rubric_id=rubric_id,
         name=data.name,
         description=data.description,
+        domain=data.domain,
+        competence=data.competence,
         max_score=data.max_score,
         weight=data.weight,
         sequence_order=max_order + 1,
+        cefr_descriptors=json.dumps(data.cefr_descriptors) if data.cefr_descriptors else None,
     )
-    session.add(criterion)
+    session.add(c)
     await session.commit()
-    await session.refresh(criterion)
-
-    return {
-        "id": str(criterion.id),
-        "name": criterion.name,
-        "description": criterion.description,
-        "max_score": criterion.max_score,
-        "weight": criterion.weight,
-        "sequence_order": criterion.sequence_order,
-    }
+    await session.refresh(c)
+    return _criterion_out(c)
 
 
-@router.patch("/criteria/{criterion_id}")
+@router.patch("/criteria/{criterion_id}", response_model=CriterionOut)
 async def update_criterion(
     criterion_id: UUID,
-    data: CriterionCreate,
+    data: CriterionIn,
     session: AsyncSession = Depends(get_session),
-    current_user: Annotated = Depends(require_teacher()),
-) -> dict:
-    """Update a criterion."""
-    result = await session.execute(
-        select(Criterion).where(Criterion.id == criterion_id)
-    )
-    criterion = result.scalar_one_or_none()
+    _: Annotated = Depends(require_admin()),
+):
+    c = (await session.execute(select(Criterion).where(Criterion.id == criterion_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Criterion not found")
 
-    if not criterion:
-        raise HTTPException(status_code=404, detail="Criterion not found")
-
-    criterion.name = data.name
-    criterion.description = data.description
-    criterion.max_score = data.max_score
-    criterion.weight = data.weight
-
+    c.name = data.name
+    c.description = data.description
+    c.domain = data.domain
+    c.competence = data.competence
+    c.max_score = data.max_score
+    c.weight = data.weight
+    c.cefr_descriptors = json.dumps(data.cefr_descriptors) if data.cefr_descriptors else None
     await session.commit()
-    await session.refresh(criterion)
-
-    return {
-        "id": str(criterion.id),
-        "name": criterion.name,
-        "description": criterion.description,
-        "max_score": criterion.max_score,
-        "weight": criterion.weight,
-        "sequence_order": criterion.sequence_order,
-    }
+    await session.refresh(c)
+    return _criterion_out(c)
 
 
 @router.delete("/criteria/{criterion_id}", status_code=204)
 async def delete_criterion(
     criterion_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: Annotated = Depends(require_teacher()),
+    _: Annotated = Depends(require_admin()),
 ):
-    """Delete a criterion."""
-    result = await session.execute(
-        select(Criterion).where(Criterion.id == criterion_id)
-    )
-    criterion = result.scalar_one_or_none()
-
-    if not criterion:
-        raise HTTPException(status_code=404, detail="Criterion not found")
-
-    await session.delete(criterion)
+    c = (await session.execute(select(Criterion).where(Criterion.id == criterion_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Criterion not found")
+    await session.delete(c)
     await session.commit()

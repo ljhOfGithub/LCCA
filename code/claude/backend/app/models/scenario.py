@@ -1,7 +1,7 @@
 """Scenario, Task, Material models."""
 import uuid
 
-from sqlalchemy import String, Text, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, Text, ForeignKey, Enum as SAEnum, Float
 from sqlalchemy import ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -44,6 +44,8 @@ class Task(Base, UUIDMixin, TimestampMixin):
     )
     sequence_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
 
     scenario: Mapped["Scenario"] = relationship("Scenario", back_populates="tasks")
     materials: Mapped[list["Material"]] = relationship(

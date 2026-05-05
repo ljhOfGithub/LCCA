@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.v1 import attempts, auth, scoring, health, timeout as timeout_routes, results, artifacts, llm_scoring
-from app.api.v1.admin import scenarios as admin_scenarios
+from app.api.v1.admin import scenarios as admin_scenarios, rubrics as admin_rubrics, prompt_templates as admin_prompt_templates
 from app.api.v1.teacher import rubrics, scenarios as teacher_scenarios, tasks, review
 from app.api.v1.student_api import scenarios as student_scenarios
 from app.api.v1.rater import human
@@ -57,6 +57,8 @@ def create_app() -> FastAPI:
 
     # Admin endpoints
     app.include_router(admin_scenarios.router, prefix="/api/v1/admin", tags=["admin-scenarios"])
+    app.include_router(admin_rubrics.router, prefix="/api/v1/admin", tags=["admin-rubrics"])
+    app.include_router(admin_prompt_templates.router, prefix="/api/v1/admin", tags=["admin-prompt-templates"])
 
     # Rater endpoints
     app.include_router(human.router, prefix="/api/v1/rater", tags=["rater"])

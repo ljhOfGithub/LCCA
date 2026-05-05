@@ -97,7 +97,24 @@ def _word_count(text: str) -> int:
     return len([w for w in re.split(r"\s+", _strip_html(text)) if w])
 
 def _criteria_text(criteria: list) -> str:
-    return "\n".join(f"- {c['name']} (max {c['max_score']}): {c.get('description','')}" for c in criteria)
+    lines = []
+    for c in criteria:
+        meta = " | ".join(filter(None, [c.get('domain'), c.get('competence')]))
+        header = f"- {c['name']} (max {c['max_score']})"
+        if meta:
+            header += f" [{meta}]"
+        if c.get('description'):
+            header += f": {c['description']}"
+        lines.append(header)
+        if c.get('cefr_descriptors'):
+            try:
+                descs = json.loads(c['cefr_descriptors']) if isinstance(c['cefr_descriptors'], str) else c['cefr_descriptors']
+                for level in ["A1", "A2", "B1", "B2", "C1", "C2"]:
+                    if level in descs:
+                        lines.append(f"    {level}: {descs[level]}")
+            except Exception:
+                pass
+    return "\n".join(lines)
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -280,7 +297,15 @@ async def score_attempt(
         # Build criteria
         if task.rubric and task.rubric.criteria:
             criteria = [
-                {"name": c.name, "max_score": c.max_score, "description": c.description or "", "obj": c}
+                {
+                    "name": c.name,
+                    "max_score": c.max_score,
+                    "description": c.description or "",
+                    "domain": c.domain,
+                    "competence": c.competence,
+                    "cefr_descriptors": c.cefr_descriptors,
+                    "obj": c,
+                }
                 for c in sorted(task.rubric.criteria, key=lambda x: x.sequence_order)
             ]
         else:

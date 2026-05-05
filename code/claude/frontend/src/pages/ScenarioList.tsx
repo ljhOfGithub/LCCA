@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { scenarioApi, authApi, attemptApi } from '../api/client'
 import TeacherDashboard from './TeacherDashboard'
+import AdminDashboard from './AdminDashboard'
 import type { Scenario } from '../types'
 
 const statusConfig = {
@@ -88,10 +89,8 @@ export default function ScenarioList() {
     return `${minutes}m`
   }
 
-  // Show teacher dashboard for teacher/admin roles
-  if (userRole === 'teacher' || userRole === 'admin') {
-    return <TeacherDashboard userName={userName} />
-  }
+  if (userRole === 'admin') return <AdminDashboard userName={userName} />
+  if (userRole === 'teacher') return <TeacherDashboard userName={userName} />
 
   const handleLogout = () => {
     localStorage.removeItem('access_token')
