@@ -173,13 +173,44 @@ async def _call_openai_compatible(prompt: str) -> dict:
     return _parse_llm_json(resp.json()["choices"][0]["message"]["content"])
 
 
-async def _call_llm(prompt: str) -> dict:
-    """Route to Anthropic or OpenAI-compatible provider based on config."""
-    if settings.anthropic_api_key:
+async def _call_llm(prompt: str, base_url: str | None = None, api_key: str | None = None, model: str | None = None) -> dict:
+    """Route to the appropriate LLM provider.
+
+    Priority: per-call override → global settings → error.
+    Supports Anthropic Claude and any OpenAI-compatible API (MiniMax, OpenAI, etc.).
+    """
+    effective_api_key = api_key or settings.llm_api_key or settings.anthropic_api_key
+    effective_base_url = base_url or settings.llm_base_url
+    effective_model = model or settings.llm_model
+
+    # Use Anthropic if no base_url override and anthropic key is set
+    if not base_url and settings.anthropic_api_key and not api_key:
         return await _call_claude(prompt)
+
+    # Use OpenAI-compatible endpoint
+    if effective_api_key and effective_base_url:
+        url_base = effective_base_url.rstrip("/")
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(
+                f"{url_base}/chat/completions",
+                headers={"Authorization": f"Bearer {effective_api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": effective_model,
+                    "max_tokens": 2048,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+            )
+        if resp.status_code != 200:
+            raise HTTPException(502, f"LLM API error {resp.status_code}: {resp.text[:300]}")
+        return _parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+
     if settings.llm_api_key:
         return await _call_openai_compatible(prompt)
-    raise HTTPException(503, "No LLM API key configured. Set ANTHROPIC_API_KEY or LLM_API_KEY.")
+
+    raise HTTPException(503, "No LLM API key configured. Set LLM_API_KEY and LLM_BASE_URL (e.g. MiniMax) or ANTHROPIC_API_KEY.")
 
 
 async def _transcribe(storage_key: str) -> str:
@@ -351,7 +382,14 @@ async def score_attempt(
         else:  # speaking
             recording_map: dict = {}
             try:
-                recording_map = json.loads(content).get("recordingMap", {})
+                parsed_content = json.loads(content)
+                recording_map = parsed_content.get("recordingMap", {})
+                # Also handle the audioKeys array format (from final submit)
+                if not recording_map:
+                    audio_keys = parsed_content.get("audioKeys", [])
+                    for i, key in enumerate(audio_keys):
+                        if key:
+                            recording_map[f"q{i+1}"] = key
             except Exception:
                 pass
 
@@ -359,7 +397,7 @@ async def score_attempt(
             for q_id, s_key in recording_map.items():
                 t = await _transcribe(s_key)
                 if t:
-                    transcripts.append(f"[Q{q_id[:4]}]: {t}")
+                    transcripts.append(f"[Q{q_id}]: {t}")
 
             if transcripts:
                 transcript = "\n".join(transcripts)

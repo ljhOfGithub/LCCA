@@ -197,6 +197,19 @@ export default function ScenarioRunner() {
     if (!responseId || !attemptId) return
 
     try {
+      // Force-flush any unsaved content before submitting so the backend has the latest value
+      const currentContent = taskContents[taskIndex]
+      if (currentContent !== undefined) {
+        await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+          },
+          body: JSON.stringify({ content: currentContent }),
+        })
+      }
+
       await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}/submit`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },

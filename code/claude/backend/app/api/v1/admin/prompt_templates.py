@@ -22,6 +22,10 @@ class PromptTemplateCreate(BaseModel):
     model: str = Field(default="gpt-4o", max_length=100)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     is_active: bool = True
+    base_url: str | None = Field(None, max_length=512,
+        description="Custom LLM base URL (e.g. https://api.minimax.chat/v1). Overrides global LLM_BASE_URL.")
+    api_key: str | None = Field(None, max_length=512,
+        description="API key for this template's LLM provider. Overrides global LLM_API_KEY.")
 
 
 class PromptTemplateUpdate(BaseModel):
@@ -32,6 +36,8 @@ class PromptTemplateUpdate(BaseModel):
     model: str | None = Field(None, max_length=100)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     is_active: bool | None = None
+    base_url: str | None = Field(None, max_length=512)
+    api_key: str | None = Field(None, max_length=512)
 
 
 class PromptTemplateResponse(BaseModel):
@@ -43,6 +49,8 @@ class PromptTemplateResponse(BaseModel):
     model: str
     temperature: float
     is_active: bool
+    base_url: str | None
+    api_key: str | None
 
     model_config = {"from_attributes": True}
 
@@ -57,6 +65,8 @@ def _to_response(pt: PromptTemplate) -> PromptTemplateResponse:
         model=pt.model,
         temperature=pt.temperature,
         is_active=pt.is_active,
+        base_url=pt.base_url,
+        api_key=pt.api_key,
     )
 
 
@@ -93,6 +103,8 @@ async def create_prompt_template(
         model=data.model,
         temperature=data.temperature,
         is_active=data.is_active,
+        base_url=data.base_url,
+        api_key=data.api_key,
     )
     session.add(pt)
     await session.commit()
@@ -145,6 +157,11 @@ async def update_prompt_template(
         pt.temperature = data.temperature
     if data.is_active is not None:
         pt.is_active = data.is_active
+    # Allow explicitly clearing base_url/api_key by passing empty string
+    if data.base_url is not None:
+        pt.base_url = data.base_url or None
+    if data.api_key is not None:
+        pt.api_key = data.api_key or None
 
     await session.commit()
     await session.refresh(pt)

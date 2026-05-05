@@ -52,6 +52,8 @@ class PromptTemplate(Base, UUIDMixin, TimestampMixin):
     model: Mapped[str] = mapped_column(String(100), nullable=False, default="gpt-4o")
     temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
 # Avoid circular import

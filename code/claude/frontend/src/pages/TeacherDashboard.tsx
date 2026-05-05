@@ -287,6 +287,45 @@ function ReviewTab() {
   )
 }
 
+function TaskContentDisplay({ content, taskType }: { content: string; taskType: string }) {
+  const type = taskType?.toLowerCase() ?? ''
+
+  if (type === 'listening') {
+    try {
+      const parsed = JSON.parse(content)
+      const notes = parsed.notes ?? ''
+      const replays = parsed.audioReplayCount ?? 0
+      if (!notes) return <p className="text-sm text-gray-400 italic">No notes submitted.</p>
+      return (
+        <div>
+          <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{notes}</p>
+          <p className="text-xs text-gray-400 mt-1">Audio replays: {replays}</p>
+        </div>
+      )
+    } catch { /* fall through to raw display */ }
+  }
+
+  if (type === 'speaking') {
+    try {
+      const parsed = JSON.parse(content)
+      const keys = parsed.audioKeys ?? Object.values(parsed.recordingMap ?? {})
+      return (
+        <p className="text-sm text-gray-500 italic">
+          Audio recording submitted ({keys.length} clip{keys.length !== 1 ? 's' : ''})
+        </p>
+      )
+    } catch { /* fall through */ }
+  }
+
+  if (type === 'writing') {
+    const stripped = content.replace(/<[^>]*>/g, '').trim()
+    if (!stripped) return <p className="text-sm text-gray-400 italic">No response submitted.</p>
+    return <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{stripped}</p>
+  }
+
+  return <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{content}</p>
+}
+
 // ── Attempt review panel ───────────────────────────────────────────────────────
 
 function AttemptReviewPanel({ attempt, onBack, onReload }: {
@@ -424,7 +463,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
             {task.content && (
               <div className="px-5 py-3 border-b border-gray-100">
                 <p className="text-xs font-medium text-gray-500 mb-1">Student Response</p>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{task.content}</p>
+                <TaskContentDisplay content={task.content} taskType={task.task_type} />
               </div>
             )}
 

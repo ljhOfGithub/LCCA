@@ -876,6 +876,8 @@ interface PromptTemplate {
   model: string
   temperature: number
   is_active: boolean
+  base_url: string | null
+  api_key: string | null
 }
 
 function PromptTemplatesTab() {
@@ -951,6 +953,8 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [systemPrompt, setSystemPrompt] = useState(initial?.system_prompt ?? '')
   const [userPrompt, setUserPrompt] = useState(initial?.user_prompt_template ?? '')
+  const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '')
+  const [apiKey, setApiKey] = useState(initial?.api_key ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -965,6 +969,8 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
       is_active: isActive,
       system_prompt: systemPrompt,
       user_prompt_template: userPrompt,
+      base_url: baseUrl.trim() || null,
+      api_key: apiKey.trim() || null,
     }
     try {
       if (initial) await apiClient.put(`/admin/prompt-templates/${initial.id}`, body)
@@ -1011,6 +1017,22 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
           <div className="flex items-center gap-2 self-end pb-2">
             <input type="checkbox" id="pt_active" checked={isActive} onChange={e => setIsActive(e.target.checked)} className="w-4 h-4" />
             <label htmlFor="pt_active" className="text-sm text-gray-700">Active</label>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Custom Base URL <span className="text-gray-400 font-normal">(optional — overrides global LLM_BASE_URL, e.g. https://api.minimax.chat/v1)</span>
+            </label>
+            <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
+              placeholder="https://api.openai.com/v1"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Custom API Key <span className="text-gray-400 font-normal">(optional — overrides global LLM_API_KEY)</span>
+            </label>
+            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
+              placeholder="sk-…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
 

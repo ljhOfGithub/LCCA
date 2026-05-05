@@ -89,8 +89,13 @@ def _rubric_out(r: Rubric) -> RubricOut:
 async def list_rubrics(
     session: AsyncSession = Depends(get_session),
     _: Annotated = Depends(require_admin()),
+    task_id: UUID | None = None,
 ):
-    result = await session.execute(select(Rubric).options(selectinload(Rubric.criteria)))
+    """List rubrics, optionally filtered by task_id."""
+    query = select(Rubric).options(selectinload(Rubric.criteria))
+    if task_id:
+        query = query.where(Rubric.task_id == task_id)
+    result = await session.execute(query)
     return [_rubric_out(r) for r in result.scalars().all()]
 
 
