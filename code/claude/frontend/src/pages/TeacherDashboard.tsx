@@ -37,12 +37,22 @@ interface CriterionDetail {
   teacher_score: number | null
   teacher_feedback: string | null
   is_teacher_reviewed: boolean
+  cefr_descriptors: Record<string, string> | null
+}
+
+interface MaterialDetail {
+  material_type: string
+  content: string | null
+  storage_key: string | null
 }
 
 interface TaskDetail {
   task_id: string
   task_type: string
   task_title: string
+  task_description: string | null
+  sequence_order: number
+  weight: number
   content: string | null
   score_run_id: string | null
   cefr_level: string
@@ -51,11 +61,15 @@ interface TaskDetail {
   criteria: CriterionDetail[]
   total_score: number
   total_max: number
+  materials: MaterialDetail[]
 }
 
 interface AttemptDetail {
   id: string
+  scenario_id: string
+  scenario_title: string
   status: string
+  started_at: string | null
   submitted_at: string | null
   cefr_level: string | null
   overall_score: number | null
@@ -69,43 +83,15 @@ interface AttemptDetail {
   tasks: TaskDetail[]
 }
 
-interface ScoreResult {
-  attempt_id: string
-  cefr_level: string
-  overall_score: number
-  overall_score_max: number
-  task_results: {
-    task_type: string
-    score: number
-    max_score: number
-    cefr_level: string
-    overall_feedback: string
-  }[]
-}
-
 // ── Main component ─────────────────────────────────────────────────────────────
-
-type Tab = 'scoring' | 'review'
 
 export default function TeacherDashboard({ userName }: { userName: string }) {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>('review')
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="font-bold text-gray-900">LCCA — Teacher</span>
-          <nav className="flex gap-1">
-            {(['scoring', 'review'] as Tab[]).map(t => (
-              <button key={t} onClick={() => setTab(t)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors
-                  ${tab === t ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}>
-                {t === 'scoring' ? 'Score Attempts' : 'Review Results'}
-              </button>
-            ))}
-          </nav>
-        </div>
+        <span className="font-bold text-gray-900">LCCA — Teacher</span>
         <div className="flex items-center gap-3 text-sm text-gray-500">
           <span className="px-2 py-0.5 bg-teal-50 text-teal-600 rounded text-xs font-medium">Teacher</span>
           <span>{userName}</span>
@@ -114,8 +100,7 @@ export default function TeacherDashboard({ userName }: { userName: string }) {
         </div>
       </header>
       <main className="flex-1 p-6">
-        {tab === 'scoring' && <ScoringTab />}
-        {tab === 'review' && <ReviewTab />}
+        <ReviewTab />
       </main>
     </div>
   )
@@ -326,6 +311,51 @@ function TaskContentDisplay({ content, taskType }: { content: string; taskType: 
   return <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{content}</p>
 }
 
+// Audio player for teacher review of speaking tasks
+function SpeakingAudioPanel({ content }: { content: string }) {
+  const [audioUrls, setAudioUrls] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let keys: string[] = []
+    try {
+      const parsed = JSON.parse(content)
+      if (parsed.recordingMap) keys = Object.values(parsed.recordingMap) as string[]
+      else if (parsed.audioKeys) keys = parsed.audioKeys
+    } catch { return }
+
+    if (keys.length === 0) { setLoading(false); return }
+
+    Promise.all(
+      keys.filter(Boolean).map(key =>
+        apiClient.get(`/teacher/review/audio-url?key=${encodeURIComponent(key)}`)
+          .then(r => r.data.url as string)
+          .catch(() => '')
+      )
+    ).then(urls => {
+      setAudioUrls(urls.filter(Boolean))
+      setLoading(false)
+    })
+  }, [content])
+
+  if (loading) return (
+    <div className="px-5 py-3 border-b border-gray-100 text-xs text-gray-400">Loading audio…</div>
+  )
+  if (audioUrls.length === 0) return null
+
+  return (
+    <div className="px-5 py-3 border-b border-gray-100 space-y-2">
+      <p className="text-xs font-medium text-gray-500">Student Recordings</p>
+      {audioUrls.map((url, i) => (
+        <div key={i} className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs text-gray-400 mb-1">Recording {i + 1}</p>
+          <audio src={url} controls className="w-full h-8" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Attempt review panel ───────────────────────────────────────────────────────
 
 function AttemptReviewPanel({ attempt, onBack, onReload }: {
@@ -382,11 +412,29 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
   const totalMax = attempt.overall_score_max ?? 0
   const pct = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0
 
+  const fmtDate = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
+
   return (
     <div className="max-w-4xl mx-auto">
       <button onClick={onBack} className="text-sm text-blue-600 hover:underline mb-4">← All Attempts</button>
 
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5">
+        {/* Scenario + attempt meta */}
+        <div className="mb-4 pb-4 border-b border-gray-100">
+          <p className="text-xs text-gray-400 mb-0.5">Scenario</p>
+          <p className="font-semibold text-gray-800">{attempt.scenario_title}</p>
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-gray-500">
+            <div><span className="block text-gray-400">Status</span><span className="capitalize font-medium text-gray-700">{attempt.status}</span></div>
+            <div><span className="block text-gray-400">Started</span><span>{fmtDate(attempt.started_at)}</span></div>
+            <div><span className="block text-gray-400">Submitted</span><span>{fmtDate(attempt.submitted_at)}</span></div>
+            <div><span className="block text-gray-400">Overall</span>
+              {totalMax > 0
+                ? <span className="font-medium text-gray-700">{pct}% · {totalScore.toFixed(1)}/{totalMax} pts</span>
+                : <span>—</span>}
+            </div>
+          </div>
+        </div>
+
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -443,23 +491,58 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
       <div className="space-y-5">
         {attempt.tasks.map(task => (
           <div key={task.task_id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-              <div>
-                <span className="font-semibold text-gray-800">{task.task_title}</span>
-                <span className="ml-2 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{task.task_type}</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-semibold text-gray-700">{task.cefr_level}</span>
-                <span className="text-gray-500">{task.total_score.toFixed(1)} / {task.total_max} pts</span>
+            {/* Task header */}
+            <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-800">
+                      Task {task.sequence_order + 1} · {task.task_type.charAt(0).toUpperCase() + task.task_type.slice(1)}
+                    </span>
+                    <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded text-xs">
+                      Weight {Math.round(task.weight * 100)}%
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{task.task_title}</p>
+                  {task.task_description && (
+                    <p className="text-xs text-gray-400 mt-1 max-w-xl">{task.task_description}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-sm flex-shrink-0">
+                  <span className="font-semibold text-gray-700">{task.cefr_level}</span>
+                  <span className="text-gray-500">{task.total_score.toFixed(1)} / {task.total_max} pts</span>
+                </div>
               </div>
             </div>
 
+            {/* Task materials (scenario content) */}
+            {task.materials.length > 0 && (
+              <details className="border-b border-gray-100">
+                <summary className="px-5 py-2 text-xs font-medium text-gray-500 cursor-pointer hover:bg-gray-50 select-none">
+                  Task Content ({task.materials.length} material{task.materials.length > 1 ? 's' : ''})
+                </summary>
+                <div className="px-5 pb-3 space-y-2">
+                  {task.materials.map((m, i) => (
+                    <div key={i} className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs font-medium text-gray-400 mb-1 capitalize">{m.material_type.replace('_', ' ')}</p>
+                      {m.content && <p className="text-sm text-gray-700 whitespace-pre-wrap">{m.content}</p>}
+                      {!m.content && m.storage_key && (
+                        <p className="text-xs text-gray-400 italic">File: {m.storage_key.split('/').pop()}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {/* AI overall feedback */}
             {task.overall_feedback && (
               <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 text-sm text-blue-800">
                 {task.overall_feedback}
               </div>
             )}
 
+            {/* Student response */}
             {task.content && (
               <div className="px-5 py-3 border-b border-gray-100">
                 <p className="text-xs font-medium text-gray-500 mb-1">Student Response</p>
@@ -467,6 +550,12 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
               </div>
             )}
 
+            {/* Speaking audio player */}
+            {task.task_type === 'speaking' && task.content && (
+              <SpeakingAudioPanel content={task.content} />
+            )}
+
+            {/* Transcript */}
             {task.transcript && (
               <div className="px-5 py-3 border-b border-gray-100">
                 <p className="text-xs font-medium text-gray-500 mb-1">Transcript</p>
@@ -474,6 +563,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
               </div>
             )}
 
+            {/* Criteria with CEFR bands */}
             <div className="divide-y divide-gray-100">
               {task.criteria.map(c => {
                 const ed = editing[c.detail_id]
@@ -482,7 +572,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                   <div key={c.detail_id} className="px-5 py-3">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-0.5">
+                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                           <span className="text-sm font-medium text-gray-700">{c.criterion_name}</span>
                           {c.is_teacher_reviewed && (
                             <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Reviewed</span>
@@ -492,6 +582,20 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                           <p className="text-xs text-gray-500 mt-0.5">
                             {c.is_teacher_reviewed && c.teacher_feedback ? c.teacher_feedback : c.feedback}
                           </p>
+                        )}
+                        {/* CEFR band descriptors */}
+                        {c.cefr_descriptors && Object.keys(c.cefr_descriptors).length > 0 && (
+                          <details className="mt-1">
+                            <summary className="text-xs text-blue-500 cursor-pointer hover:text-blue-700">Band descriptors</summary>
+                            <div className="mt-1 grid grid-cols-2 gap-1">
+                              {Object.entries(c.cefr_descriptors).map(([band, desc]) => (
+                                <div key={band} className="bg-gray-50 rounded px-2 py-1 text-xs">
+                                  <span className="font-semibold text-gray-600">{band}: </span>
+                                  <span className="text-gray-500">{desc}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
                         )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -540,129 +644,3 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
   )
 }
 
-// ── Scoring tab ────────────────────────────────────────────────────────────────
-
-function ScoringTab() {
-  const [scenarios, setScenarios] = useState<Scenario[]>([])
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('')
-  const [attempts, setAttempts] = useState<AttemptSummary[]>([])
-  const [scoring, setScoring] = useState<Record<string, 'idle' | 'loading' | 'done'>>({})
-  const [scoredResults, setScoredResults] = useState<Record<string, ScoreResult>>({})
-  const [loadingAttempts, setLoadingAttempts] = useState(false)
-  const [filterNum, setFilterNum] = useState('')
-  const [filterName, setFilterName] = useState('')
-
-  useEffect(() => {
-    apiClient.get('/teacher/published').then(r => {
-      const list: Scenario[] = Array.isArray(r.data) ? r.data : (r.data.items || [])
-      setScenarios(list)
-      if (list.length > 0) loadAttempts(list[0].id, '', '')
-    }).catch(console.error)
-  }, [])
-
-  const loadAttempts = async (scenarioId: string, num: string, name: string) => {
-    setSelectedScenarioId(scenarioId)
-    setAttempts([])
-    setScoredResults({})
-    if (!scenarioId) return
-    setLoadingAttempts(true)
-    try {
-      const params: Record<string, string> = { status: 'submitted' }
-      if (num) params.student_number = num
-      if (name) params.student_name = name
-      const r = await apiClient.get(`/teacher/review/scenarios/${scenarioId}/attempts`, { params })
-      const all: AttemptSummary[] = r.data
-      setAttempts(all.filter(a => !a.has_result))
-    } catch (e) { console.error(e) }
-    finally { setLoadingAttempts(false) }
-  }
-
-  const handleFilter = (num: string, name: string) => {
-    setFilterNum(num)
-    setFilterName(name)
-    if (selectedScenarioId) loadAttempts(selectedScenarioId, num, name)
-  }
-
-  const scoreAttempt = async (attemptId: string) => {
-    setScoring(prev => ({ ...prev, [attemptId]: 'loading' }))
-    try {
-      const r = await apiClient.post(`/scoring/attempt/${attemptId}`)
-      setScoredResults(prev => ({ ...prev, [attemptId]: r.data }))
-      setScoring(prev => ({ ...prev, [attemptId]: 'done' }))
-      setAttempts(prev => prev.filter(a => a.id !== attemptId))
-    } catch (e: any) {
-      alert(e.response?.data?.detail || 'Scoring failed. Check LLM API key is set.')
-      setScoring(prev => ({ ...prev, [attemptId]: 'idle' }))
-    }
-  }
-
-  return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex items-center gap-4 mb-4 flex-wrap">
-        <h2 className="text-lg font-semibold text-gray-800">Score Submitted Attempts</h2>
-        <select value={selectedScenarioId} onChange={e => loadAttempts(e.target.value, filterNum, filterName)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">Select a scenario…</option>
-          {scenarios.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
-        </select>
-        {selectedScenarioId && !loadingAttempts && (
-          <button onClick={() => loadAttempts(selectedScenarioId, filterNum, filterName)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Refresh</button>
-        )}
-      </div>
-
-      {selectedScenarioId && (
-        <div className="mb-4">
-          <StudentFilter onFilter={handleFilter} />
-        </div>
-      )}
-
-      {loadingAttempts && <div className="text-center py-8 text-gray-400">Loading attempts…</div>}
-
-      {!loadingAttempts && selectedScenarioId && attempts.length === 0 && Object.keys(scoredResults).length === 0 && (
-        <div className="text-center py-12 text-gray-400">No unscored submitted attempts for this scenario.</div>
-      )}
-
-      <div className="space-y-4">
-        {attempts.map(a => (
-          <AttemptCard key={a.id} a={a} action={
-            <button onClick={() => scoreAttempt(a.id)} disabled={scoring[a.id] === 'loading'}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2
-                ${scoring[a.id] === 'loading' ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-              {scoring[a.id] === 'loading' ? (
-                <><svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                </svg>Scoring…</>
-              ) : 'Score with AI'}
-            </button>
-          } />
-        ))}
-
-        {Object.entries(scoredResults).map(([id, r]) => (
-          <div key={id} className="bg-green-50 border border-green-200 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="font-semibold text-green-900">Attempt {id.slice(0, 8)}… — Scored</p>
-              <div className="flex items-center gap-3">
-                <span className="text-2xl font-bold text-green-700">{r.cefr_level}</span>
-                <span className="text-sm text-green-600">{r.overall_score?.toFixed(1)} / {r.overall_score_max?.toFixed(1)} pts</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {r.task_results?.map((t, i) => (
-                <div key={i} className="bg-white rounded-lg p-3 text-sm">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-medium capitalize text-gray-800">{t.task_type}</span>
-                    <span className="text-green-700 font-semibold">{t.cefr_level}</span>
-                  </div>
-                  <div className="text-xs text-gray-500">{t.score?.toFixed(1)} / {t.max_score} pts</div>
-                  <p className="text-xs text-gray-600 mt-1 line-clamp-3">{t.overall_feedback}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}

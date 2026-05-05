@@ -757,10 +757,10 @@ function CriterionCard({ criterion: c, onEdit, onDelete }: { criterion: Criterio
       </div>
       {expanded && c.cefr_descriptors && (
         <div className="border-t border-gray-100 grid grid-cols-2 divide-x divide-y divide-gray-100">
-          {RUBRIC_CEFR_BANDS.map(level => (
+          {Object.entries(c.cefr_descriptors).map(([level, desc]) => (
             <div key={level} className="px-3 py-2">
               <span className="text-xs font-bold text-indigo-600">{level}</span>
-              <p className="text-xs text-gray-500 mt-0.5">{c.cefr_descriptors![level] || '—'}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{desc || '—'}</p>
             </div>
           ))}
         </div>
@@ -780,15 +780,30 @@ function CriterionForm({ initial, onSave, onCancel }: {
   const [competence, setCompetence] = useState(initial?.competence ?? '')
   const [maxScore, setMaxScore] = useState(String(initial?.max_score ?? 5))
   const [weight] = useState(String(initial?.weight ?? 1))
-  const [descriptors, setDescriptors] = useState<Record<string, string>>(
-    initial?.cefr_descriptors ?? Object.fromEntries(RUBRIC_CEFR_BANDS.map(l => [l, '']))
-  )
+  // Dynamic CEFR bands: list of [band, descriptor] pairs so order and count are user-controlled
+  const initBands = (): [string, string][] => {
+    const src = initial?.cefr_descriptors ?? Object.fromEntries(RUBRIC_CEFR_BANDS.map(l => [l, '']))
+    return Object.entries(src)
+  }
+  const [bands, setBands] = useState<[string, string][]>(initBands)
+  const [newBandKey, setNewBandKey] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const addBand = () => {
+    const key = newBandKey.trim().toUpperCase()
+    if (!key || bands.some(([k]) => k === key)) return
+    setBands(prev => [...prev, [key, '']])
+    setNewBandKey('')
+  }
+  const removeBand = (idx: number) => setBands(prev => prev.filter((_, i) => i !== idx))
+  const setBandDesc = (idx: number, val: string) =>
+    setBands(prev => prev.map((b, i) => i === idx ? [b[0], val] : b))
 
   const handleSave = async () => {
     if (!name.trim()) return
     setSaving(true)
-    const cefrFilled = Object.values(descriptors).some(v => v.trim())
+    const descriptorObj = Object.fromEntries(bands.filter(([k]) => k.trim()))
+    const cefrFilled = bands.some(([, v]) => v.trim())
     try {
       await onSave({
         name,
@@ -797,7 +812,7 @@ function CriterionForm({ initial, onSave, onCancel }: {
         competence: competence || null,
         max_score: parseFloat(maxScore) || 5,
         weight: parseFloat(weight) || 1,
-        cefr_descriptors: cefrFilled ? descriptors : null,
+        cefr_descriptors: cefrFilled ? descriptorObj : null,
       })
     } finally { setSaving(false) }
   }
@@ -840,17 +855,36 @@ function CriterionForm({ initial, onSave, onCancel }: {
       </div>
 
       <div>
-        <label className="block text-xs font-semibold text-gray-600 mb-2">CEFR Band Descriptors (A2–C1)</label>
-        <div className="grid grid-cols-2 gap-2">
-          {RUBRIC_CEFR_BANDS.map(level => (
-            <div key={level}>
-              <label className="block text-xs font-medium text-indigo-600 mb-0.5">{level}</label>
-              <textarea value={descriptors[level] ?? ''} rows={3}
-                onChange={e => setDescriptors(prev => ({ ...prev, [level]: e.target.value }))}
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-semibold text-gray-600">CEFR Band Descriptors</label>
+          <div className="flex items-center gap-1">
+            <input value={newBandKey} onChange={e => setNewBandKey(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addBand()}
+              placeholder="e.g. B2" maxLength={4}
+              className="w-16 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+            <button type="button" onClick={addBand}
+              className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-xs hover:bg-indigo-100 border border-indigo-200">
+              + Band
+            </button>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {bands.map(([level, desc], idx) => (
+            <div key={idx} className="flex gap-2 items-start">
+              <div className="w-12 shrink-0 pt-1 text-center">
+                <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">{level}</span>
+              </div>
+              <textarea value={desc} rows={2}
+                onChange={e => setBandDesc(idx, e.target.value)}
                 placeholder={`${level} descriptor…`}
-                className="w-full border border-gray-300 rounded px-2 py-1 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <button type="button" onClick={() => removeBand(idx)}
+                className="text-red-400 hover:text-red-600 text-xs pt-1">✕</button>
             </div>
           ))}
+          {bands.length === 0 && (
+            <p className="text-xs text-gray-400 italic">No bands yet — type a band label above and click + Band.</p>
+          )}
         </div>
       </div>
 
@@ -873,11 +907,21 @@ interface PromptTemplate {
   template_type: string
   system_prompt: string
   user_prompt_template: string
-  model: string
-  temperature: number
   is_active: boolean
-  base_url: string | null
-  api_key: string | null
+  task_ids: string[]
+}
+
+interface TaskSummary {
+  id: string
+  title: string
+  task_type: string
+  sequence_order: number
+}
+
+interface ScenarioWithTasks {
+  id: string
+  title: string
+  tasks: TaskSummary[]
 }
 
 function PromptTemplatesTab() {
@@ -925,8 +969,10 @@ function PromptTemplatesTab() {
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className="font-medium text-gray-900 text-sm font-mono">{t.name}</span>
                   <span className="text-xs px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded">{t.template_type}</span>
-                  <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{t.model}</span>
-                  <span className="text-xs text-gray-400">temp {t.temperature}</span>
+                  {t.task_ids.length > 0
+                    ? <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{t.task_ids.length} task{t.task_ids.length > 1 ? 's' : ''}</span>
+                    : <span className="text-xs px-1.5 py-0.5 bg-yellow-50 text-yellow-700 rounded">no task assigned</span>
+                  }
                   {!t.is_active && <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded">Inactive</span>}
                 </div>
                 <p className="text-xs text-gray-400 truncate">{t.system_prompt.slice(0, 120)}…</p>
@@ -948,15 +994,25 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
 }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [templateType, setTemplateType] = useState(initial?.template_type ?? 'scoring')
-  const [model, setModel] = useState(initial?.model ?? 'gpt-4o')
-  const [temperature, setTemperature] = useState(String(initial?.temperature ?? 0))
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [systemPrompt, setSystemPrompt] = useState(initial?.system_prompt ?? '')
   const [userPrompt, setUserPrompt] = useState(initial?.user_prompt_template ?? '')
-  const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '')
-  const [apiKey, setApiKey] = useState(initial?.api_key ?? '')
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>(initial?.task_ids ?? [])
+  const [scenarios, setScenarios] = useState<ScenarioWithTasks[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    apiClient.get('/admin/scenarios-with-tasks')
+      .then(r => setScenarios(r.data))
+      .catch(console.error)
+  }, [])
+
+  const toggleTask = (taskId: string) => {
+    setSelectedTaskIds(prev =>
+      prev.includes(taskId) ? prev.filter(id => id !== taskId) : [...prev, taskId]
+    )
+  }
 
   const handleSave = async () => {
     if (!name.trim()) { setError('Name is required'); return }
@@ -964,13 +1020,11 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
     if (!userPrompt.trim()) { setError('User prompt template is required'); return }
     setSaving(true); setError('')
     const body = {
-      name, template_type: templateType, model,
-      temperature: parseFloat(temperature) || 0,
+      name, template_type: templateType,
       is_active: isActive,
       system_prompt: systemPrompt,
       user_prompt_template: userPrompt,
-      base_url: baseUrl.trim() || null,
-      api_key: apiKey.trim() || null,
+      task_ids: selectedTaskIds,
     }
     try {
       if (initial) await apiClient.put(`/admin/prompt-templates/${initial.id}`, body)
@@ -999,41 +1053,48 @@ function PromptTemplateForm({ initial, onSave, onCancel }: {
             <input value={templateType} onChange={e => setTemplateType(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Model</label>
-            <select value={model} onChange={e => setModel(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="gpt-4o">gpt-4o</option>
-              <option value="gpt-4o-mini">gpt-4o-mini</option>
-              <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Temperature (0–2)</label>
-            <input type="number" min="0" max="2" step="0.1" value={temperature}
-              onChange={e => setTemperature(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
           <div className="flex items-center gap-2 self-end pb-2">
             <input type="checkbox" id="pt_active" checked={isActive} onChange={e => setIsActive(e.target.checked)} className="w-4 h-4" />
             <label htmlFor="pt_active" className="text-sm text-gray-700">Active</label>
           </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Custom Base URL <span className="text-gray-400 font-normal">(optional — overrides global LLM_BASE_URL, e.g. https://api.minimax.chat/v1)</span>
-            </label>
-            <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
-              placeholder="https://api.openai.com/v1"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Custom API Key <span className="text-gray-400 font-normal">(optional — overrides global LLM_API_KEY)</span>
-            </label>
-            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
-              placeholder="sk-…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
+        </div>
+
+        {/* Task assignment */}
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-2">
+            Applicable Tasks
+            <span className="ml-1 font-normal text-gray-400">(select which scenario/task combinations this template applies to)</span>
+          </label>
+          {scenarios.length === 0 ? (
+            <p className="text-xs text-gray-400 italic">No scenarios found.</p>
+          ) : (
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-64 overflow-y-auto">
+              {scenarios.map(scenario => (
+                <div key={scenario.id} className="p-3">
+                  <p className="text-xs font-semibold text-gray-700 mb-1.5">{scenario.title}</p>
+                  <div className="space-y-1 pl-2">
+                    {scenario.tasks.map(task => (
+                      <label key={task.id} className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={selectedTaskIds.includes(task.id)}
+                          onChange={() => toggleTask(task.id)}
+                          className="w-3.5 h-3.5 rounded"
+                        />
+                        <span className="text-xs text-gray-700 group-hover:text-gray-900">
+                          Task {task.sequence_order + 1} — {task.title}
+                        </span>
+                        <span className="text-xs px-1 py-0.5 bg-gray-100 text-gray-500 rounded">{task.task_type}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {selectedTaskIds.length > 0 && (
+            <p className="text-xs text-blue-600 mt-1">{selectedTaskIds.length} task{selectedTaskIds.length > 1 ? 's' : ''} selected</p>
+          )}
         </div>
 
         <div>

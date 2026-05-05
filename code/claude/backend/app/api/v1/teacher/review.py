@@ -10,10 +10,12 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from app.core.security import require_teacher
+from app.core.config import settings
 from app.db.session import get_session
 from app.models.user import Teacher, User, Student
 from app.models.attempt import Attempt, AttemptStatus
-from app.models.scenario import Scenario, Task
+from app.models.scenario import Scenario, Task, Material
+from app.models.rubric import Criterion
 from app.models.scoring import ScoreRun, ScoreDetail, AttemptResult
 
 
@@ -119,12 +121,22 @@ class CriterionDetail(BaseModel):
     teacher_score: float | None
     teacher_feedback: str | None
     is_teacher_reviewed: bool
+    cefr_descriptors: dict | None = None
+
+
+class MaterialDetail(BaseModel):
+    material_type: str
+    content: str | None
+    storage_key: str | None
 
 
 class TaskDetail(BaseModel):
     task_id: str
     task_type: str
     task_title: str
+    task_description: str | None
+    sequence_order: int
+    weight: float
     content: str | None
     score_run_id: str | None
     cefr_level: str
@@ -133,10 +145,13 @@ class TaskDetail(BaseModel):
     criteria: list[CriterionDetail]
     total_score: float
     total_max: float
+    materials: list[MaterialDetail] = []
 
 
 class AttemptDetail(BaseModel):
     id: str
+    scenario_id: str
+    scenario_title: str
     status: str
     started_at: datetime | None
     submitted_at: datetime | None
@@ -171,8 +186,15 @@ async def get_attempt_detail(
     if not attempt:
         raise HTTPException(404, "Attempt not found")
 
+    scenario_r = await session.execute(select(Scenario).where(Scenario.id == attempt.scenario_id))
+    scenario = scenario_r.scalar_one_or_none()
+    scenario_title = scenario.title if scenario else "Unknown Scenario"
+
     tasks_r = await session.execute(
-        select(Task).where(Task.scenario_id == attempt.scenario_id).order_by(Task.sequence_order)
+        select(Task)
+        .options(selectinload(Task.materials))
+        .where(Task.scenario_id == attempt.scenario_id)
+        .order_by(Task.sequence_order)
     )
     tasks = {str(t.id): t for t in tasks_r.scalars().all()}
 
@@ -196,17 +218,31 @@ async def get_attempt_detail(
 
         runs_r = await session.execute(
             select(ScoreRun)
-            .options(selectinload(ScoreRun.score_details))
+            .options(
+                selectinload(ScoreRun.score_details).selectinload(ScoreDetail.criterion)
+            )
             .where(ScoreRun.task_response_id == tr.id)
             .order_by(ScoreRun.created_at.desc())
         )
         runs = runs_r.scalars().all()
+
+        task_materials = [
+            MaterialDetail(
+                material_type=m.material_type,
+                content=m.content,
+                storage_key=m.storage_key,
+            )
+            for m in (task.materials or [])
+        ]
 
         if not runs:
             task_details.append(TaskDetail(
                 task_id=str(task.id),
                 task_type=task_type,
                 task_title=task.title,
+                task_description=task.description,
+                sequence_order=task.sequence_order,
+                weight=task.weight,
                 content=tr.content,
                 score_run_id=None,
                 cefr_level="—",
@@ -215,6 +251,7 @@ async def get_attempt_detail(
                 criteria=[],
                 total_score=0,
                 total_max=0,
+                materials=task_materials,
             ))
             continue
 
@@ -232,10 +269,21 @@ async def get_attempt_detail(
         )
         total_max = sum(d.max_score for d in details)
 
+        def _parse_cefr(d: ScoreDetail) -> dict | None:
+            if d.criterion and d.criterion.cefr_descriptors:
+                try:
+                    return json.loads(d.criterion.cefr_descriptors)
+                except Exception:
+                    pass
+            return None
+
         task_details.append(TaskDetail(
             task_id=str(task.id),
             task_type=task_type,
             task_title=task.title,
+            task_description=task.description,
+            sequence_order=task.sequence_order,
+            weight=task.weight,
             content=tr.content,
             score_run_id=str(latest.id),
             cefr_level=raw.get("cefr_level", "—"),
@@ -251,16 +299,20 @@ async def get_attempt_detail(
                     teacher_score=d.teacher_score,
                     teacher_feedback=d.teacher_feedback,
                     is_teacher_reviewed=d.is_teacher_reviewed,
+                    cefr_descriptors=_parse_cefr(d),
                 )
                 for d in details
             ],
             total_score=total_score,
             total_max=total_max,
+            materials=task_materials,
         ))
 
     student = attempt.student
     return AttemptDetail(
         id=str(attempt.id),
+        scenario_id=str(attempt.scenario_id),
+        scenario_title=scenario_title,
         status=attempt.status.value,
         started_at=attempt.started_at,
         submitted_at=attempt.submitted_at,
@@ -354,3 +406,34 @@ async def finalize_attempt(
 
     await session.commit()
     return {"status": "finalized", "cefr_level": ar.cefr_level}
+
+
+# ── Audio presigned URL ────────────────────────────────────────────────────────
+
+@router.get("/audio-url")
+async def get_audio_presigned_url(
+    key: str,
+    _: User = Depends(require_teacher()),
+):
+    """Return a short-lived presigned URL for a MinIO audio storage key."""
+    import asyncio, os, boto3
+
+    def _generate() -> str:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+        )
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.s3_bucket, "Key": key},
+            ExpiresIn=3600,
+        )
+        public_endpoint = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
+        return url.replace(settings.s3_endpoint, public_endpoint)
+
+    loop = asyncio.get_event_loop()
+    url = await loop.run_in_executor(None, _generate)
+    return {"url": url}

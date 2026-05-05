@@ -2,7 +2,7 @@
 import uuid
 
 from sqlalchemy import String, Text, ForeignKey, Float, Integer, Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TimestampMixin
@@ -54,6 +54,7 @@ class PromptTemplate(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    task_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
 
 # Avoid circular import

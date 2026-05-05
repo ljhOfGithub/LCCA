@@ -1,5 +1,67 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import RecordingControls, { useAudioRecording } from '../../components/RecordingControls'
+
+// Simple playback component that works around Chrome WebM duration-metadata bug
+function RecordingPlayback({ src, recordedDuration }: { src?: string; recordedDuration: number }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [realDuration, setRealDuration] = useState(recordedDuration)
+  const [isPlaying, setIsPlaying] = useState(false)
+
+  // Seek-to-end trick: Chrome WebM blobs lack duration metadata; seeking far ahead forces the
+  // browser to scan the file and populate audio.duration correctly.
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || !src) return
+    const onLoaded = () => {
+      if (isFinite(audio.duration) && audio.duration > 0) {
+        setRealDuration(audio.duration)
+      } else {
+        audio.currentTime = 1e9
+      }
+    }
+    const onSeeked = () => {
+      if (isFinite(audio.duration) && audio.duration > 0) {
+        setRealDuration(audio.duration)
+        audio.currentTime = 0
+      }
+    }
+    audio.addEventListener('loadedmetadata', onLoaded)
+    audio.addEventListener('seeked', onSeeked)
+    return () => {
+      audio.removeEventListener('loadedmetadata', onLoaded)
+      audio.removeEventListener('seeked', onSeeked)
+    }
+  }, [src])
+
+  const fmt = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`
+  const progress = realDuration > 0 ? (currentTime / realDuration) * 100 : 0
+
+  return (
+    <div className="bg-gray-50 rounded-lg p-4">
+      <audio ref={audioRef} src={src}
+        onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
+        onEnded={() => setIsPlaying(false)} />
+      <div className="flex items-center gap-3">
+        <button onClick={() => { isPlaying ? audioRef.current?.pause() : audioRef.current?.play(); setIsPlaying(p => !p) }}
+          className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700">
+          {isPlaying
+            ? <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+            : <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>}
+        </button>
+        <div className="flex-1">
+          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="flex justify-between text-xs text-gray-400 mt-1">
+            <span>{fmt(currentTime)}</span>
+            <span>{fmt(realDuration)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface SpeakingQuestion {
   id: string
@@ -48,6 +110,7 @@ export default function Task4Speaking({
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [recordings, setRecordings] = useState<{ [key: string]: string }>(restoredRecordings) // questionId -> audioKey
   const [recordingBlobUrls, setRecordingBlobUrls] = useState<{ [key: string]: string }>({}) // questionId -> blob URL for playback
+  const [recordingDurations, setRecordingDurations] = useState<{ [key: string]: number }>({}) // questionId -> seconds
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
 
@@ -90,6 +153,7 @@ export default function Task4Speaking({
       const newRecordings = { ...recordings, [currentQuestion.id]: storageKey }
       setRecordings(newRecordings)
       setRecordingBlobUrls((prev) => ({ ...prev, [currentQuestion.id]: blobUrlSnapshot }))
+      setRecordingDurations((prev) => ({ ...prev, [currentQuestion.id]: duration }))
 
       // Persist after each confirmed recording so state survives task navigation
       if (saveResponse) {
@@ -204,23 +268,20 @@ export default function Task4Speaking({
                       d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <span className="font-medium">Recording completed</span>
+                  <span className="text-xs text-gray-400 ml-2">
+                    ({formatTime(recordingDurations[currentQuestion?.id] ?? duration)})
+                  </span>
                 </div>
               </div>
 
-              <audio
+              <RecordingPlayback
                 src={recordingBlobUrls[currentQuestion?.id] || audioUrl || undefined}
-                controls
-                className="w-full"
+                recordedDuration={recordingDurations[currentQuestion?.id] ?? duration}
               />
 
               <p className="text-sm text-gray-500 text-center mt-4">
                 You cannot re-record once submitted. Please proceed to the next question.
               </p>
-
-              {/* Playback info */}
-              <div className="mt-4 text-center text-xs text-gray-400">
-                Recording duration: {formatTime(duration)}
-              </div>
             </div>
           ) : (
             // Recording controls

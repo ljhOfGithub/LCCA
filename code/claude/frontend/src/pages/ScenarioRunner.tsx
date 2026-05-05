@@ -65,6 +65,7 @@ export default function ScenarioRunner() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const currentTask = tasks[currentTaskIndex]
+  const allTasksCompleted = tasks.length > 0 && tasks.every((_, i) => taskStatuses[i] === 'completed')
   // Default to 90 minutes if not specified
   const totalSeconds = 90 * 60
 
@@ -331,7 +332,8 @@ export default function ScenarioRunner() {
           <div className="mt-4">
             <button
               onClick={handleSubmitAll}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !allTasksCompleted}
+              title={!allTasksCompleted ? 'Complete all tasks before submitting' : undefined}
               className="w-full py-3 bg-green-600 text-white rounded-lg font-medium
                 hover:bg-green-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed
                 flex items-center justify-center gap-2"

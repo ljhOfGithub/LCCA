@@ -150,8 +150,8 @@ class Scorer:
             rubric = await self._get_rubric(task.id)
             criteria = await self._get_criteria(rubric.id)
 
-            # Get prompt template (optional)
-            prompt_template = await self._get_prompt_template(rubric.id) if rubric else None
+            # Get prompt template (optional) — prefer task-specific assignment
+            prompt_template = await self._get_prompt_template(rubric.id, task_id=task.id) if rubric else None
 
             # Score based on task type
             raw_llm_response = None
@@ -289,24 +289,31 @@ class Scorer:
     async def _get_prompt_template(
         self,
         rubric_id: uuid.UUID,
+        task_id: uuid.UUID | None = None,
         template_type: str = "scoring",
     ) -> PromptTemplate | None:
-        """Get prompt template for rubric.
+        """Get prompt template for a task.
 
-        Args:
-            rubric_id: Rubric UUID
-            template_type: Template type (scoring, feedback, etc.)
-
-        Returns:
-            PromptTemplate if found, None otherwise
+        Prefers a template explicitly assigned to `task_id`. Falls back to
+        first active template matching `template_type`.
         """
         result = await self.session.execute(
-            select(PromptTemplate).where(
-                PromptTemplate.template_type == template_type,
-                PromptTemplate.is_active == True,
-            )
+            select(PromptTemplate).where(PromptTemplate.is_active == True)
         )
-        return result.scalar_one_or_none()
+        templates = result.scalars().all()
+
+        if task_id:
+            task_id_str = str(task_id)
+            for t in templates:
+                ids = t.task_ids if isinstance(t.task_ids, list) else []
+                if task_id_str in ids:
+                    return t
+
+        # Fall back to first active template of matching type
+        for t in templates:
+            if t.template_type == template_type:
+                return t
+        return None
 
     async def _score_text(
         self,
