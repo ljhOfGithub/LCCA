@@ -4,7 +4,7 @@
 
 - Social-interpersonal等评分领域 domain/aspect
 - Linguistic等评分能力 competence
-- cfer语言评分等级 level
+- cfer 语言评分等级 level
 - 矩阵单元格 competence matrix
 
 ### 评分标准实体
@@ -94,6 +94,10 @@
   - name
   - version
   - status
+  - confidence_threshold (decimal)  ← 加，如 0.65
+  - review_triggers (jsonb)         ← 加
+    # ["asr_confidence_low", "boundary_score", "outlier_criterion", 
+    #  "weak_evidence_sociolinguistic"]
 - 评分细则 rubric_criterion
   - rubric_id
   - 编码
@@ -101,6 +105,15 @@
   - description_i18n(jsonb)
   - domain_id
   - competence_id
+  - - weight_within_task            ← 加（如 0.30 表示在 task 内占 30%）
+  - ai_evidence_sources (jsonb)   ← 加，存"AI 该看哪些信号"
+    # ["semantic similarity to reference list",
+    #  "concept extraction",
+    #  "coverage scoring",
+    #  "relevance filtering"]
+  - ai_scoring_notes (jsonb)      ← 加，存"AI 评分时的注意事项"
+    # ["Accept semantically equivalent phrases",
+    #  "Do not require exact distinction between quality and responsibility"]
 - rubric_band_descriptor 评分描述（字段包含中文描述、英文描述）
   - rubric_creteria_id
   - 等级band（1-4）
@@ -128,6 +141,7 @@
   - response_schema(jsonb)
   - config(jsonb)
   - version(替换 material 时，task 也要跟着升版本)
+  - weight_in_scenario
 - 材料（资源） material
   - name
   - material_type(including prompt)
@@ -246,6 +260,7 @@
   - rationale
   - evidence_ref
   - completed_at
+  - confidence (decimal)
 - 最终评分结果 attempt_result
   - aid
   - score_run_id_list
