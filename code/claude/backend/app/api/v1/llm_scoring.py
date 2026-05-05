@@ -18,8 +18,7 @@ from app.db.session import get_session
 from app.models.attempt import Attempt, AttemptStatus, TaskResponse
 from app.models.scoring import ScoreRun, ScoreDetail, AttemptResult
 from app.models.scenario import Scenario, Task, Material
-from app.models.rubric import Criterion
-from app.models.rubric import Rubric, Criterion
+from app.models.rubric import Rubric, Criterion, PromptTemplate
 from app.core.status import ScoreRunStatus
 
 router = APIRouter()
@@ -128,8 +127,8 @@ def _parse_llm_json(raw: str) -> dict:
         raise HTTPException(502, f"Could not parse LLM response: {raw[:200]}")
 
 
-async def _call_claude(prompt: str) -> dict:
-    """Call Anthropic Claude API."""
+async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> tuple[dict, str, dict | None]:
+    """Call Anthropic Claude API. Returns (parsed, model, usage)."""
     async with httpx.AsyncClient(timeout=90.0) as client:
         resp = await client.post(
             "https://api.anthropic.com/v1/messages",
@@ -141,54 +140,34 @@ async def _call_claude(prompt: str) -> dict:
             json={
                 "model": settings.anthropic_model,
                 "max_tokens": 2048,
-                "system": SYSTEM_PROMPT,
+                "system": system,
                 "messages": [{"role": "user", "content": prompt}],
             },
         )
     if resp.status_code != 200:
         raise HTTPException(502, f"Claude API error {resp.status_code}: {resp.text[:300]}")
-    return _parse_llm_json(resp.json()["content"][0]["text"])
+    body = resp.json()
+    usage = body.get("usage")
+    if usage:
+        usage = {"prompt_tokens": usage.get("input_tokens"), "completion_tokens": usage.get("output_tokens"), "total_tokens": (usage.get("input_tokens", 0) + usage.get("output_tokens", 0))}
+    return _parse_llm_json(body["content"][0]["text"]), settings.anthropic_model, usage
 
 
-async def _call_openai_compatible(prompt: str) -> dict:
-    """Call any OpenAI-compatible LLM API (MiniMax, OpenAI, etc.)."""
-    base = settings.llm_base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        resp = await client.post(
-            f"{base}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.llm_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": settings.llm_model,
-                "max_tokens": 2048,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-            },
-        )
-    if resp.status_code != 200:
-        raise HTTPException(502, f"LLM API error {resp.status_code}: {resp.text[:300]}")
-    return _parse_llm_json(resp.json()["choices"][0]["message"]["content"])
-
-
-async def _call_llm(prompt: str, base_url: str | None = None, api_key: str | None = None, model: str | None = None) -> dict:
-    """Route to the appropriate LLM provider.
-
-    Priority: per-call override → global settings → error.
-    Supports Anthropic Claude and any OpenAI-compatible API (MiniMax, OpenAI, etc.).
-    """
+async def _call_llm(
+    prompt: str,
+    system: str = SYSTEM_PROMPT,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> tuple[dict, str | None, dict | None]:
+    """Route to the appropriate LLM provider. Returns (parsed, model_name, usage)."""
     effective_api_key = api_key or settings.llm_api_key or settings.anthropic_api_key
     effective_base_url = base_url or settings.llm_base_url
     effective_model = model or settings.llm_model
 
-    # Use Anthropic if no base_url override and anthropic key is set
     if not base_url and settings.anthropic_api_key and not api_key:
-        return await _call_claude(prompt)
+        return await _call_claude(prompt, system=system)
 
-    # Use OpenAI-compatible endpoint
     if effective_api_key and effective_base_url:
         url_base = effective_base_url.rstrip("/")
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -199,19 +178,65 @@ async def _call_llm(prompt: str, base_url: str | None = None, api_key: str | Non
                     "model": effective_model,
                     "max_tokens": 2048,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": system},
                         {"role": "user", "content": prompt},
                     ],
                 },
             )
         if resp.status_code != 200:
             raise HTTPException(502, f"LLM API error {resp.status_code}: {resp.text[:300]}")
-        return _parse_llm_json(resp.json()["choices"][0]["message"]["content"])
-
-    if settings.llm_api_key:
-        return await _call_openai_compatible(prompt)
+        body = resp.json()
+        raw_usage = body.get("usage", {})
+        usage = {
+            "prompt_tokens": raw_usage.get("prompt_tokens"),
+            "completion_tokens": raw_usage.get("completion_tokens"),
+            "total_tokens": raw_usage.get("total_tokens"),
+        } if raw_usage else None
+        return _parse_llm_json(body["choices"][0]["message"]["content"]), effective_model, usage
 
     raise HTTPException(503, "No LLM API key configured. Set LLM_API_KEY and LLM_BASE_URL (e.g. MiniMax) or ANTHROPIC_API_KEY.")
+
+
+async def _get_task_template(session: AsyncSession, task: Task) -> PromptTemplate | None:
+    """Return the prompt template explicitly assigned to this task, or None."""
+    task_id_str = str(task.id)
+    result = await session.execute(
+        select(PromptTemplate).where(PromptTemplate.is_active == True)
+    )
+    for t in result.scalars().all():
+        ids = t.task_ids if isinstance(t.task_ids, list) else []
+        if task_id_str in ids:
+            return t
+    return None
+
+
+def _render_template(template_str: str, vars: dict) -> str:
+    import re
+    def _replace(m: re.Match) -> str:
+        key = m.group(1)
+        return str(vars[key]) if key in vars else m.group(0)
+    return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _replace, template_str)
+
+
+def _normalize_scores(llm: dict) -> dict:
+    """Normalise both score formats to dict-of-dicts for uniform processing.
+
+    Template format: {"scores": [{"criterion": "...", "score": X, "max_score": Y, "feedback": "..."}]}
+    Legacy format:   {"scores": {"criterion_name": {"score": X, "max": Y, "feedback": "..."}}}
+    """
+    scores = llm.get("scores", {})
+    if isinstance(scores, list):
+        normalised = {}
+        for entry in scores:
+            name = entry.get("criterion", "")
+            if name:
+                normalised[name] = {
+                    "score": entry.get("score", 0),
+                    "max": entry.get("max_score", entry.get("max", 0)),
+                    "feedback": entry.get("feedback", ""),
+                }
+        return {**llm, "scores": normalised}
+    return llm
 
 
 async def _transcribe(storage_key: str) -> str:
@@ -357,35 +382,37 @@ async def score_attempt(
         transcript: str | None = None
 
         if task_type == "reading":
-            prompt = TASK_PROMPTS["reading"].format(
+            default_prompt = TASK_PROMPTS["reading"].format(
                 material=material_text or task.description or "(no text provided)",
                 response=content or "(no notes submitted)",
                 criteria=criteria_text,
             )
+            submission_for_vars = content or ""
         elif task_type == "writing":
             clean = _strip_html(content)
-            prompt = TASK_PROMPTS["writing"].format(
+            default_prompt = TASK_PROMPTS["writing"].format(
                 material=material_text or task.description or "(no job description)",
                 response=clean or "(no response submitted)",
                 word_count=_word_count(content),
                 criteria=criteria_text,
             )
+            submission_for_vars = clean
         elif task_type == "listening":
             notes = content
             try:
                 notes = json.loads(content).get("notes", content)
             except Exception:
                 pass
-            prompt = TASK_PROMPTS["listening"].format(
+            default_prompt = TASK_PROMPTS["listening"].format(
                 response=notes or "(no notes submitted)",
                 criteria=criteria_text,
             )
+            submission_for_vars = notes or ""
         else:  # speaking
             recording_map: dict = {}
             try:
                 parsed_content = json.loads(content)
                 recording_map = parsed_content.get("recordingMap", {})
-                # Also handle the audioKeys array format (from final submit)
                 if not recording_map:
                     audio_keys = parsed_content.get("audioKeys", [])
                     for i, key in enumerate(audio_keys):
@@ -402,19 +429,65 @@ async def score_attempt(
 
             if transcripts:
                 transcript = "\n".join(transcripts)
-                prompt = TASK_PROMPTS["speaking"].format(
+                default_prompt = TASK_PROMPTS["speaking"].format(
                     transcript=transcript,
                     criteria=criteria_text,
                 )
             else:
                 transcript = None
-                prompt = TASK_PROMPTS["speaking_no_asr"].format(
+                default_prompt = TASK_PROMPTS["speaking_no_asr"].format(
                     recording_count=len(recording_map),
                     criteria=criteria_text,
                 )
+            submission_for_vars = transcript or ""
 
-        # Call LLM
-        llm = await _call_llm(prompt)
+        # Look up prompt template assigned to this task
+        pt = await _get_task_template(session, task)
+        if pt:
+            materials_by_type = {m.material_type: m.content for m in (task.materials or []) if m.content}
+            all_materials = "\n\n".join(
+                f"[{k.upper()}]\n{v}" for k, v in materials_by_type.items()
+            )
+            crit_lines = "\n".join(
+                f"- {c['name']} (max {c['max_score']}): {c.get('description', '')}"
+                for c in criteria
+            )
+            total_max_score = sum(c["max_score"] for c in criteria)
+            max_score_single = max((c["max_score"] for c in criteria), default=10)
+            template_vars = {
+                "task_title": task.title,
+                "task_type": task_type,
+                "task_description": task.description or "",
+                "materials": all_materials,
+                **{f"material_{k}": v for k, v in materials_by_type.items()},
+                "criteria": crit_lines,
+                "submission": submission_for_vars,
+                "transcription": transcript or "",
+                "max_score": max_score_single,
+                "total_max_score": total_max_score,
+                "json_format": (
+                    '{"scores": [{"criterion": "<name>", "score": <number>,'
+                    ' "max_score": <number>, "feedback": "<text>"}],'
+                    ' "overall_feedback": "<summary>", "cefr_level": "<A2|B1|B2|C1>"}'
+                ),
+            }
+            rendered_system = _render_template(pt.system_prompt, template_vars)
+            rendered_user = _render_template(pt.user_prompt_template, template_vars)
+            prompt_template_name = pt.name
+            llm_model_override = pt.model
+        else:
+            rendered_system = SYSTEM_PROMPT
+            rendered_user = default_prompt
+            prompt_template_name = None
+            llm_model_override = None
+
+        # Call LLM — record start/end times around the actual call
+        run_started_at = datetime.now(timezone.utc)
+        llm_raw, llm_model_used, llm_usage = await _call_llm(
+            rendered_user, system=rendered_system, model=llm_model_override
+        )
+        run_completed_at = datetime.now(timezone.utc)
+        llm = _normalize_scores(llm_raw)
         scores_raw = llm.get("scores", {})
         task_score = 0.0
         task_max = 0.0
@@ -431,9 +504,14 @@ async def score_attempt(
         score_run = ScoreRun(
             task_response_id=tr.id,
             status=ScoreRunStatus.COMPLETED,
-            run_started_at=datetime.now(timezone.utc),
-            run_completed_at=datetime.now(timezone.utc),
-            raw_llm_response=json.dumps(llm),
+            run_started_at=run_started_at,
+            run_completed_at=run_completed_at,
+            raw_llm_response=json.dumps(llm_raw),
+            prompt_template_name=prompt_template_name,
+            rendered_system_prompt=rendered_system,
+            rendered_user_prompt=rendered_user,
+            llm_model=llm_model_used,
+            llm_token_usage=json.dumps(llm_usage) if llm_usage else None,
         )
         session.add(score_run)
         await session.flush()

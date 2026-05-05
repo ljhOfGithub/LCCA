@@ -481,7 +481,8 @@ async def list_score_runs(
         attempt = tr.attempt if tr else None
         student = attempt.student if attempt else None
 
-        task_type_str = str(getattr(task, "task_type", "")).lower() if task else ""
+        task_type_val = getattr(task, "task_type", None) if task else None
+        task_type_str = (task_type_val.value if hasattr(task_type_val, "value") else str(task_type_val)).lower() if task_type_val else ""
         if task_type and task_type_str != task_type.lower():
             continue
 

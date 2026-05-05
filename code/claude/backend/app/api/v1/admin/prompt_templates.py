@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.session import get_session
 from app.core.security import require_admin
+from app.core.config import settings
 from app.models.rubric import PromptTemplate
 from app.models.scenario import Scenario, Task
 
@@ -136,7 +137,7 @@ async def create_prompt_template(
         template_type=data.template_type,
         system_prompt=data.system_prompt,
         user_prompt_template=data.user_prompt_template,
-        model="gpt-4o",
+        model=settings.llm_model or settings.anthropic_model or "gpt-4o",
         temperature=0.0,
         is_active=data.is_active,
         task_ids=data.task_ids or [],

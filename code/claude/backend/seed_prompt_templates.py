@@ -19,7 +19,7 @@ Python escaping rules for these strings:
   • {{literal}}  → stored as {literal}      (double braces = escape, NOT substituted)
   All JSON schema examples use {{double braces}} so they survive format_map() intact.
 """
-import asyncio
+import asyncio, os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
@@ -407,13 +407,14 @@ async def seed():
                          model, temperature, is_active, created_at, updated_at)
                     VALUES
                         (:name, :template_type, :system_prompt, :user_prompt_template,
-                         'gpt-4o', 0.0, true, now(), now())
+                         :model, 0.0, true, now(), now())
                 """),
                 {
                     "name": t["name"],
                     "template_type": t["template_type"],
                     "system_prompt": t["system_prompt"],
                     "user_prompt_template": t["user_prompt_template"],
+                    "model": os.environ.get("LLM_MODEL", os.environ.get("ANTHROPIC_MODEL", "gpt-4o")),
                 }
             )
             print(f"  seeded:   {t['name']}")

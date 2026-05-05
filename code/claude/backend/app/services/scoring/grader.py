@@ -411,11 +411,12 @@ class Scorer:
 
     @staticmethod
     def _render_template(template_str: str, vars: dict) -> str:
-        """Render a prompt template, leaving unknown {placeholders} intact."""
-        class SafeDict(dict):
-            def __missing__(self, key: str) -> str:
-                return "{" + key + "}"
-        return template_str.format_map(SafeDict(**vars))
+        """Render a prompt template, substituting {identifier} placeholders only."""
+        import re
+        def _replace(m: re.Match) -> str:
+            key = m.group(1)
+            return str(vars[key]) if key in vars else m.group(0)
+        return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _replace, template_str)
 
     @staticmethod
     def _map_scores(parsed: dict, criteria: list[Criterion]) -> dict:
