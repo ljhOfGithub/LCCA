@@ -139,6 +139,7 @@ class TaskDetail(BaseModel):
     weight: float
     content: str | None
     score_run_id: str | None
+    prompt_template_name: str | None
     cefr_level: str
     overall_feedback: str
     transcript: str | None
@@ -245,6 +246,7 @@ async def get_attempt_detail(
                 weight=task.weight,
                 content=tr.content,
                 score_run_id=None,
+                prompt_template_name=None,
                 cefr_level="—",
                 overall_feedback="Not yet scored",
                 transcript=None,
@@ -286,6 +288,7 @@ async def get_attempt_detail(
             weight=task.weight,
             content=tr.content,
             score_run_id=str(latest.id),
+            prompt_template_name=latest.prompt_template_name,
             cefr_level=raw.get("cefr_level", "—"),
             overall_feedback=raw.get("overall_feedback", ""),
             transcript=raw.get("transcript"),

@@ -171,9 +171,11 @@ class Scorer:
                 else:
                     raise ValueError(f"Unknown task type: {task_type}")
 
-            # Save score run with raw LLM response
+            # Save score run with raw LLM response and template name
             if raw_llm_response:
                 score_run.raw_llm_response = str(raw_llm_response)
+            if prompt_template:
+                score_run.prompt_template_name = prompt_template.name
 
             # Save score details
             score_details = []

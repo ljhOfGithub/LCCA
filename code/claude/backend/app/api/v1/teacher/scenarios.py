@@ -83,6 +83,8 @@ class ScenarioResponse(BaseModel):
     status: ScenarioStatus
     created_by_id: str
     tasks: List[TaskResponse] = Field(default_factory=list)
+    duration_minutes: int = 0
+    total_tasks: int = 0
     model_config = {"from_attributes": True}
 
 
@@ -116,13 +118,19 @@ def _task_response(t: Task) -> TaskResponse:
 
 
 def _scenario_response(s: Scenario) -> ScenarioResponse:
+    import math
+    tasks = sorted(s.tasks, key=lambda x: x.sequence_order)
+    total_s = sum(t.time_limit_seconds or 0 for t in tasks)
+    duration_minutes = max(1, math.ceil(total_s / 60)) if total_s > 0 else 60
     return ScenarioResponse(
         id=str(s.id),
         title=s.title,
         description=s.description,
         status=s.status,
         created_by_id=str(s.created_by_id),
-        tasks=[_task_response(t) for t in sorted(s.tasks, key=lambda x: x.sequence_order)],
+        tasks=[_task_response(t) for t in tasks],
+        duration_minutes=duration_minutes,
+        total_tasks=len(tasks),
     )
 
 

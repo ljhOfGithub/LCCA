@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
+import WebmAudioPlayer from '../components/WebmAudioPlayer'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -146,10 +147,7 @@ function SpeakingAudioSection({ content }: { content: string }) {
   return (
     <div className="space-y-2 mt-2">
       {audioUrls.map((url, i) => (
-        <div key={i} className="bg-gray-50 rounded-lg p-3">
-          <p className="text-xs text-gray-400 mb-1">Recording {i + 1}</p>
-          <audio src={url} controls className="w-full h-8" />
-        </div>
+        <WebmAudioPlayer key={i} src={url} label={audioUrls.length > 1 ? `Recording ${i + 1}` : undefined} />
       ))}
     </div>
   )

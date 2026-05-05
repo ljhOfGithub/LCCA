@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
+import WebmAudioPlayer from '../components/WebmAudioPlayer'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ interface TaskDetail {
   weight: number
   content: string | null
   score_run_id: string | null
+  prompt_template_name: string | null
   cefr_level: string
   overall_feedback: string
   transcript: string | null
@@ -347,10 +349,7 @@ function SpeakingAudioPanel({ content }: { content: string }) {
     <div className="px-5 py-3 border-b border-gray-100 space-y-2">
       <p className="text-xs font-medium text-gray-500">Student Recordings</p>
       {audioUrls.map((url, i) => (
-        <div key={i} className="bg-gray-50 rounded-lg p-3">
-          <p className="text-xs text-gray-400 mb-1">Recording {i + 1}</p>
-          <audio src={url} controls className="w-full h-8" />
-        </div>
+        <WebmAudioPlayer key={i} src={url} label={audioUrls.length > 1 ? `Recording ${i + 1}` : undefined} />
       ))}
     </div>
   )
@@ -533,6 +532,14 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                   ))}
                 </div>
               </details>
+            )}
+
+            {/* Prompt template used */}
+            {task.prompt_template_name && (
+              <div className="px-5 py-2 border-b border-gray-100 flex items-center gap-2">
+                <span className="text-xs text-gray-400">Prompt template:</span>
+                <span className="text-xs font-mono px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded">{task.prompt_template_name}</span>
+              </div>
             )}
 
             {/* AI overall feedback */}

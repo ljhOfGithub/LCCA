@@ -30,6 +30,7 @@ class ScoreRun(Base, UUIDMixin, TimestampMixin):
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_llm_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_template_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     task_response: Mapped["TaskResponse"] = relationship("TaskResponse")
     score_details: Mapped[list["ScoreDetail"]] = relationship(
