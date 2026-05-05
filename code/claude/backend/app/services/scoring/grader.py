@@ -19,6 +19,7 @@ from app.models.scenario import Task, Material
 from app.services.llm import (
     LLMClient,
     LLMProvider,
+    LLMResponse,
     OpenAIClient,
     AnthropicClient,
     MiniMaxClient,
@@ -160,28 +161,38 @@ class Scorer:
             prompt_template = await self._get_prompt_template(rubric.id, task_id=task.id) if rubric else None
 
             # Score based on task type
-            raw_llm_response = None
+            llm_resp: LLMResponse | None = None
+            rendered_sys: str | None = None
+            rendered_usr: str | None = None
             async with await self.create_llm_client(provider) as llm:
                 if task_type in [self.TASK_TYPE_WRITING, self.TASK_TYPE_READING]:
-                    scores, raw_llm_response = await self._score_text(
+                    scores, llm_resp, rendered_sys, rendered_usr = await self._score_text(
                         llm, task, content, criteria, prompt_template
                     )
                 elif task_type == self.TASK_TYPE_SPEAKING:
-                    scores, raw_llm_response = await self._score_speaking(
+                    scores, llm_resp, rendered_sys, rendered_usr = await self._score_speaking(
                         llm, task, content, criteria, prompt_template
                     )
                 elif task_type == self.TASK_TYPE_LISTENING:
-                    scores, raw_llm_response = await self._score_text(
+                    scores, llm_resp, rendered_sys, rendered_usr = await self._score_text(
                         llm, task, content, criteria, prompt_template
                     )
                 else:
                     raise ValueError(f"Unknown task type: {task_type}")
 
-            # Save score run with raw LLM response and template name
-            if raw_llm_response:
-                score_run.raw_llm_response = str(raw_llm_response)
-            if prompt_template:
-                score_run.prompt_template_name = prompt_template.name
+            # Persist all LLM interaction data
+            score_run.prompt_template_name = (
+                prompt_template.name if prompt_template else f"[default:{task_type}]"
+            )
+            score_run.rendered_system_prompt = rendered_sys
+            score_run.rendered_user_prompt = rendered_usr
+            if llm_resp:
+                # Store the scoring text as raw_llm_response so review.py can parse it
+                score_run.raw_llm_response = llm_resp.content
+                score_run.llm_model = llm_resp.model
+                score_run.llm_token_usage = (
+                    json.dumps(llm_resp.usage, ensure_ascii=False) if llm_resp.usage else None
+                )
 
             # Build a map from criterion_id → name for convenience
             criteria_by_id = {str(c.id): c.name for c in criteria}
@@ -439,7 +450,7 @@ class Scorer:
         content: str,
         criteria: list[Criterion],
         prompt_template: PromptTemplate | None = None,
-    ) -> tuple[dict[str, dict], str | None]:
+    ) -> tuple[dict[str, dict], LLMResponse, str | None, str | None]:
         if content.startswith("artifact:"):
             content = "[Content fetched from artifact]"
 
@@ -471,9 +482,8 @@ class Scorer:
             model=model,
         )
 
-        raw_response = str(response.raw_response) if getattr(response, "raw_response", None) else None
         parsed = parse_score_response(response.content)
-        return self._map_scores(parsed, criteria), raw_response
+        return self._map_scores(parsed, criteria), response, system_prompt, user_prompt
 
     async def _score_speaking(
         self,
@@ -482,7 +492,7 @@ class Scorer:
         audio_storage_key: str,
         criteria: list[Criterion],
         prompt_template: PromptTemplate | None = None,
-    ) -> tuple[dict[str, dict], str | None]:
+    ) -> tuple[dict[str, dict], LLMResponse, str | None, str | None]:
         asr_client = WhisperClient(api_key=settings.asr_api_key or settings.llm_api_key)
         transcription = await asr_client.transcribe(audio_url=audio_storage_key, language="en")
         await asr_client.close()
@@ -519,9 +529,8 @@ class Scorer:
             model=model,
         )
 
-        raw_response = str(response.raw_response) if getattr(response, "raw_response", None) else None
         parsed = parse_score_response(response.content)
-        return self._map_scores(parsed, criteria), raw_response
+        return self._map_scores(parsed, criteria), response, system_prompt, user_prompt
 
 
 def create_scorer(session: AsyncSession) -> Scorer:

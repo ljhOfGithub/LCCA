@@ -6,6 +6,7 @@ import WaitingForScoring from './pages/WaitingForScoring'
 import ResultReport from './pages/ResultReport'
 import ResultPage from './pages/ResultPage'
 import LoginPage from './pages/LoginPage'
+import LLMLogsPage from './pages/LLMLogsPage'
 import type { ExamResult } from './types'
 
 // Wrapper component for SubmissionConfirmation with params
@@ -61,6 +62,7 @@ function App() {
         <Route path="/exam/:scenarioId/waiting" element={<WaitingForScoringPage />} />
         <Route path="/exam/:scenarioId/result" element={<ResultReportPage />} />
         <Route path="/result/:attemptId" element={<ResultPage />} />
+        <Route path="/teacher/logs" element={<LLMLogsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

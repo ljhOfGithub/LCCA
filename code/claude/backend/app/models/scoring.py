@@ -31,6 +31,10 @@ class ScoreRun(Base, UUIDMixin, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_llm_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_template_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rendered_system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rendered_user_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    llm_token_usage: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {prompt_tokens, completion_tokens, total_tokens}
 
     task_response: Mapped["TaskResponse"] = relationship("TaskResponse")
     score_details: Mapped[list["ScoreDetail"]] = relationship(

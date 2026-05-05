@@ -57,6 +57,8 @@ interface TaskDetail {
   content: string | null
   score_run_id: string | null
   prompt_template_name: string | null
+  rendered_system_prompt: string | null
+  rendered_user_prompt: string | null
   cefr_level: string
   overall_feedback: string
   transcript: string | null
@@ -95,6 +97,13 @@ export default function TeacherDashboard({ userName }: { userName: string }) {
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <span className="font-bold text-gray-900">LCCA — Teacher</span>
         <div className="flex items-center gap-3 text-sm text-gray-500">
+          <button onClick={() => navigate('/teacher/logs')}
+            className="flex items-center gap-1.5 px-3 py-1 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            LLM 日志
+          </button>
           <span className="px-2 py-0.5 bg-teal-50 text-teal-600 rounded text-xs font-medium">Teacher</span>
           <span>{userName}</span>
           <button onClick={() => { localStorage.removeItem('access_token'); navigate('/login') }}
@@ -534,12 +543,47 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
               </details>
             )}
 
-            {/* Prompt template used */}
-            {task.prompt_template_name && (
-              <div className="px-5 py-2 border-b border-gray-100 flex items-center gap-2">
-                <span className="text-xs text-gray-400">Prompt template:</span>
-                <span className="text-xs font-mono px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded">{task.prompt_template_name}</span>
-              </div>
+            {/* Prompt used — expandable, always shown for scored tasks */}
+            {task.score_run_id && (
+              <details className="border-b border-gray-100 group">
+                <summary className="px-5 py-2.5 flex items-center gap-2 cursor-pointer hover:bg-gray-50 select-none list-none">
+                  <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span className="text-xs text-gray-500 font-medium">Prompt 详情</span>
+                  {task.prompt_template_name && (
+                    <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                      task.prompt_template_name.startsWith('[default:')
+                        ? 'bg-gray-100 text-gray-500'
+                        : 'bg-purple-50 text-purple-700'
+                    }`}>
+                      {task.prompt_template_name}
+                    </span>
+                  )}
+                </summary>
+                <div className="px-5 pb-4 space-y-3 bg-gray-50">
+                  {task.rendered_system_prompt ? (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 pt-3">System Prompt</p>
+                      <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono bg-white border border-gray-200 rounded-lg p-3 max-h-64 overflow-y-auto leading-relaxed">
+                        {task.rendered_system_prompt}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 italic pt-3">System prompt 未记录（旧评分记录）</p>
+                  )}
+                  {task.rendered_user_prompt ? (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">User Prompt</p>
+                      <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono bg-white border border-gray-200 rounded-lg p-3 max-h-96 overflow-y-auto leading-relaxed">
+                        {task.rendered_user_prompt}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 italic">User prompt 未记录（旧评分记录）</p>
+                  )}
+                </div>
+              </details>
             )}
 
             {/* AI overall feedback */}

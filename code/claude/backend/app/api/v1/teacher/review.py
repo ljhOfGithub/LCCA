@@ -13,7 +13,7 @@ from app.core.security import require_teacher
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.user import Teacher, User, Student
-from app.models.attempt import Attempt, AttemptStatus
+from app.models.attempt import Attempt, AttemptStatus, TaskResponse
 from app.models.scenario import Scenario, Task, Material
 from app.models.rubric import Criterion
 from app.models.scoring import ScoreRun, ScoreDetail, AttemptResult
@@ -140,6 +140,8 @@ class TaskDetail(BaseModel):
     content: str | None
     score_run_id: str | None
     prompt_template_name: str | None
+    rendered_system_prompt: str | None
+    rendered_user_prompt: str | None
     cefr_level: str
     overall_feedback: str
     transcript: str | None
@@ -247,6 +249,8 @@ async def get_attempt_detail(
                 content=tr.content,
                 score_run_id=None,
                 prompt_template_name=None,
+                rendered_system_prompt=None,
+                rendered_user_prompt=None,
                 cefr_level="—",
                 overall_feedback="Not yet scored",
                 transcript=None,
@@ -289,6 +293,8 @@ async def get_attempt_detail(
             content=tr.content,
             score_run_id=str(latest.id),
             prompt_template_name=latest.prompt_template_name,
+            rendered_system_prompt=latest.rendered_system_prompt,
+            rendered_user_prompt=latest.rendered_user_prompt,
             cefr_level=raw.get("cefr_level", "—"),
             overall_feedback=raw.get("overall_feedback", ""),
             transcript=raw.get("transcript"),
@@ -409,6 +415,99 @@ async def finalize_attempt(
 
     await session.commit()
     return {"status": "finalized", "cefr_level": ar.cefr_level}
+
+
+# ── LLM scoring log ───────────────────────────────────────────────────────────
+
+class ScoreRunLogEntry(BaseModel):
+    score_run_id: str
+    task_response_id: str
+    task_id: str
+    task_title: str
+    task_type: str
+    scenario_title: str
+    student_number: str | None
+    student_name: str | None
+    prompt_template_name: str | None
+    rendered_system_prompt: str | None
+    rendered_user_prompt: str | None
+    llm_model: str | None
+    llm_token_usage: str | None  # JSON string: {prompt_tokens, completion_tokens, total_tokens}
+    raw_llm_response: str | None
+    status: str
+    run_started_at: datetime | None
+    run_completed_at: datetime | None
+    error_message: str | None
+    created_at: datetime
+
+
+@router.get("/score-runs", response_model=list[ScoreRunLogEntry])
+async def list_score_runs(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_teacher()),
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=30, ge=1, le=100),
+    task_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+):
+    """List all LLM scoring runs in reverse-chronological order for the log page."""
+    offset = (page - 1) * per_page
+
+    query = (
+        select(ScoreRun)
+        .options(
+            selectinload(ScoreRun.task_response)
+            .selectinload(TaskResponse.task)
+            .selectinload(Task.scenario),
+            selectinload(ScoreRun.task_response)
+            .selectinload(TaskResponse.attempt)
+            .selectinload(Attempt.student)
+            .selectinload(Student.user),
+        )
+        .order_by(ScoreRun.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    if status:
+        query = query.where(ScoreRun.status == status)
+
+    runs_r = await session.execute(query)
+    runs = runs_r.scalars().all()
+
+    entries: list[ScoreRunLogEntry] = []
+    for run in runs:
+        tr = run.task_response
+        task = tr.task if tr else None
+        attempt = tr.attempt if tr else None
+        student = attempt.student if attempt else None
+
+        task_type_str = str(getattr(task, "task_type", "")).lower() if task else ""
+        if task_type and task_type_str != task_type.lower():
+            continue
+
+        entries.append(ScoreRunLogEntry(
+            score_run_id=str(run.id),
+            task_response_id=str(run.task_response_id),
+            task_id=str(task.id) if task else "",
+            task_title=task.title if task else "—",
+            task_type=task_type_str or "—",
+            scenario_title=task.scenario.title if task and task.scenario else "—",
+            student_number=student.student_number if student else None,
+            student_name=student.user.full_name if student and student.user else None,
+            prompt_template_name=run.prompt_template_name,
+            rendered_system_prompt=run.rendered_system_prompt,
+            rendered_user_prompt=run.rendered_user_prompt,
+            llm_model=run.llm_model,
+            llm_token_usage=run.llm_token_usage,
+            raw_llm_response=run.raw_llm_response,
+            status=run.status.value if hasattr(run.status, "value") else str(run.status),
+            run_started_at=run.run_started_at,
+            run_completed_at=run.run_completed_at,
+            error_message=run.error_message,
+            created_at=run.created_at,
+        ))
+
+    return entries
 
 
 # ── Audio presigned URL ────────────────────────────────────────────────────────
