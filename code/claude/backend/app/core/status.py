@@ -1,6 +1,44 @@
 """Status machine enums and validation logic for LCCA exam entities."""
 from enum import Enum
 
+# Module-level dicts avoid the Python Enum _attr instance-lookup gotcha where
+# self._transitions on an enum instance goes through __getattr__ → member_map
+# instead of the class dict, returning the wrong object.
+
+_ATTEMPT_TRANSITIONS: dict[str, set[str]] = {
+    "created":     {"in_progress"},
+    "in_progress": {"submitted", "cancelled"},
+    "submitted":   {"scored", "cancelled"},
+    "scored":      set(),
+    "cancelled":   set(),
+}
+
+_TASK_RESPONSE_TRANSITIONS: dict[str, set[str]] = {
+    "not_started": {"in_progress"},
+    "in_progress": {"submitted"},
+    "submitted":   {"scored"},
+    "scored":      set(),
+}
+
+_ARTIFACT_TRANSITIONS: dict[str, set[str]] = {
+    "uploading": {"uploaded", "failed"},
+    "uploaded":  set(),
+    "failed":    set(),
+}
+
+_SCORE_RUN_TRANSITIONS: dict[str, set[str]] = {
+    "pending":   {"running"},
+    "running":   {"completed", "failed"},
+    "completed": set(),
+    "failed":    {"pending"},  # allow retry
+}
+
+_SCENARIO_TRANSITIONS: dict[str, set[str]] = {
+    "draft":     {"published"},
+    "published": {"archived"},
+    "archived":  set(),
+}
+
 
 class AttemptStatus(str, Enum):
     """attempt entity status machine: created -> in_progress -> submitted -> scored -> cancelled"""
@@ -10,16 +48,8 @@ class AttemptStatus(str, Enum):
     SCORED = "scored"
     CANCELLED = "cancelled"
 
-    _transitions = {
-        CREATED: {IN_PROGRESS},
-        IN_PROGRESS: {SUBMITTED, CANCELLED},
-        SUBMITTED: {SCORED, CANCELLED},
-        SCORED: set(),
-        CANCELLED: set(),
-    }
-
     def can_transition_to(self, target: "AttemptStatus") -> bool:
-        return target in self._transitions.get(self, set())
+        return target.value in _ATTEMPT_TRANSITIONS.get(self.value, set())
 
 
 class TaskResponseStatus(str, Enum):
@@ -29,15 +59,8 @@ class TaskResponseStatus(str, Enum):
     SUBMITTED = "submitted"
     SCORED = "scored"
 
-    _transitions = {
-        NOT_STARTED: {IN_PROGRESS},
-        IN_PROGRESS: {SUBMITTED},
-        SUBMITTED: {SCORED},
-        SCORED: set(),
-    }
-
     def can_transition_to(self, target: "TaskResponseStatus") -> bool:
-        return target in self._transitions.get(self, set())
+        return target.value in _TASK_RESPONSE_TRANSITIONS.get(self.value, set())
 
 
 class ArtifactStatus(str, Enum):
@@ -46,14 +69,8 @@ class ArtifactStatus(str, Enum):
     UPLOADED = "uploaded"
     FAILED = "failed"
 
-    _transitions = {
-        UPLOADING: {UPLOADED, FAILED},
-        UPLOADED: set(),
-        FAILED: set(),
-    }
-
     def can_transition_to(self, target: "ArtifactStatus") -> bool:
-        return target in self._transitions.get(self, set())
+        return target.value in _ARTIFACT_TRANSITIONS.get(self.value, set())
 
 
 class ScoreRunStatus(str, Enum):
@@ -63,15 +80,8 @@ class ScoreRunStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-    _transitions = {
-        PENDING: {RUNNING},
-        RUNNING: {COMPLETED, FAILED},
-        COMPLETED: set(),
-        FAILED: {PENDING},  # allow retry
-    }
-
     def can_transition_to(self, target: "ScoreRunStatus") -> bool:
-        return target in self._transitions.get(self, set())
+        return target.value in _SCORE_RUN_TRANSITIONS.get(self.value, set())
 
 
 class ScenarioStatus(str, Enum):
@@ -80,14 +90,8 @@ class ScenarioStatus(str, Enum):
     PUBLISHED = "published"
     ARCHIVED = "archived"
 
-    _transitions = {
-        DRAFT: {PUBLISHED},
-        PUBLISHED: {ARCHIVED},
-        ARCHIVED: set(),
-    }
-
     def can_transition_to(self, target: "ScenarioStatus") -> bool:
-        return target in self._transitions.get(self, set())
+        return target.value in _SCENARIO_TRANSITIONS.get(self.value, set())
 
 
 class TaskType(str, Enum):
