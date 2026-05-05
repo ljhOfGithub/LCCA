@@ -10,7 +10,7 @@ from app.services.scoring.prompts import (
 __all__ = [
     "Scorer",
     "create_scorer",
-    "DEFAULT_WRITING_PROMPT,
+    "DEFAULT_WRITING_PROMPT",
     "DEFAULT_SPEAKING_PROMPT",
     "get_writing_prompt",
     "get_speaking_prompt",

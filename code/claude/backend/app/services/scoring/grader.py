@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.status import ScoreRunStatus, TaskResponseStatus
 from app.models.attempt import TaskResponse, Attempt, AttemptStatus
-from app.models.artifact import ResponseArtifact, ArtifactStatus
+from app.models.artifact import ResponseArtifact
 from app.models.rubric import Rubric, Criterion, PromptTemplate
 from app.models.scenario import Task, Material
 from app.services.llm import (
@@ -262,7 +262,7 @@ class Scorer:
             artifacts = await self.session.execute(
                 select(ResponseArtifact).where(
                     ResponseArtifact.task_response_id == task_response.id,
-                    ResponseArtifact.status == ArtifactStatus.UPLOADED,
+                    ResponseArtifact.status == "uploaded",
                 )
             )
             audio_artifacts = artifacts.scalars().all()
@@ -279,7 +279,7 @@ class Scorer:
             artifacts = await self.session.execute(
                 select(ResponseArtifact).where(
                     ResponseArtifact.task_response_id == task_response.id,
-                    ResponseArtifact.status == ArtifactStatus.UPLOADED,
+                    ResponseArtifact.status == "uploaded",
                 )
             )
 
