@@ -38,7 +38,8 @@ class ScoreRun(Base, UUIDMixin, TimestampMixin):
 
     task_response: Mapped["TaskResponse"] = relationship("TaskResponse")
     score_details: Mapped[list["ScoreDetail"]] = relationship(
-        "ScoreDetail", back_populates="score_run", lazy="selectin"
+        "ScoreDetail", back_populates="score_run", lazy="selectin",
+        cascade="all, delete-orphan",
     )
 
 

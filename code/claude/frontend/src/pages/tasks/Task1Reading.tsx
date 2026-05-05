@@ -15,6 +15,7 @@ interface Task1ReadingProps {
   saveResponse: (taskIndex: number, content: string) => void
   onContentChange?: (content: string) => void
   onTimerPause?: (remaining: number) => void
+  isSubmitted?: boolean
 }
 
 export default function Task1Reading({
@@ -27,6 +28,7 @@ export default function Task1Reading({
   saveResponse,
   onContentChange,
   onTimerPause,
+  isSubmitted = false,
 }: Task1ReadingProps) {
   const [notes, setNotes] = useState(initialContent)
 
@@ -190,22 +192,33 @@ export default function Task1Reading({
           <div className="flex-1">
             <textarea
               value={notes}
+              readOnly={isSubmitted}
               onChange={(e) => {
+                if (isSubmitted) return
                 setNotes(e.target.value)
                 onContentChange?.(e.target.value)
               }}
               placeholder="Take notes here... You can type freely."
-              className="w-full h-full bg-white border border-gray-200 rounded-lg p-4 resize-none
-                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                text-gray-700 placeholder-gray-400"
+              className={`w-full h-full border rounded-lg p-4 resize-none text-gray-700 placeholder-gray-400
+                ${isSubmitted
+                  ? 'bg-gray-50 border-gray-200 cursor-default'
+                  : 'bg-white border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                }`}
             />
           </div>
         </div>
       </div>
 
-      {/* Submit Button */}
-      {onSubmit && (
-        <div className="flex justify-end pt-4 border-t border-gray-200 mt-4">
+      {/* Submit / Submitted */}
+      <div className="flex justify-end pt-4 border-t border-gray-200 mt-4">
+        {isSubmitted ? (
+          <span className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-sm font-medium">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Task submitted
+          </span>
+        ) : onSubmit && (
           <button
             onClick={onSubmit}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700
@@ -217,8 +230,8 @@ export default function Task1Reading({
             </svg>
             Submit Task 1
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

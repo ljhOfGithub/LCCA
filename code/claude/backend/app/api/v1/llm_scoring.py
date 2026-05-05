@@ -262,8 +262,9 @@ async def _transcribe(storage_key: str) -> str:
         return f"[Download failed: {e}]"
 
     ext = storage_key.rsplit(".", 1)[-1] if "." in storage_key else "webm"
-    mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "webm": "audio/webm"}.get(ext, "audio/webm")
+    mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "webm": "audio/webm", "ogg": "audio/ogg", "m4a": "audio/mp4"}.get(ext, "audio/webm")
     asr_url = settings.asr_api_url or "https://api.openai.com/v1/audio/transcriptions"
+    asr_model = settings.asr_model or "whisper-1"
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -271,13 +272,19 @@ async def _transcribe(storage_key: str) -> str:
                 asr_url,
                 headers={"Authorization": f"Bearer {settings.asr_api_key}"},
                 files={"file": (f"audio.{ext}", audio_bytes, mime)},
-                data={"model": "whisper-1"},
+                data={"model": asr_model, "response_format": "json", "language": "en"},
             )
         if resp.status_code == 200:
-            return resp.json().get("text", "")
-        return f"[ASR error {resp.status_code}]"
+            body = resp.json()
+            # Handle both {"text": "..."} and {"results": [{"transcript": "..."}]}
+            return body.get("text") or body.get("transcript") or ""
+        import logging
+        logging.getLogger(__name__).warning(f"ASR {resp.status_code}: {resp.text[:200]}")
+        return ""
     except Exception as e:
-        return f"[ASR failed: {e}]"
+        import logging
+        logging.getLogger(__name__).warning(f"ASR failed: {e}")
+        return ""
 
 
 def _cefr_from_votes(votes: list[str]) -> str:
@@ -424,7 +431,8 @@ async def score_attempt(
             transcripts: list[str] = []
             for q_id, s_key in recording_map.items():
                 t = await _transcribe(s_key)
-                if t:
+                # Discard error strings from ASR (they start with '[')
+                if t and not t.startswith('['):
                     transcripts.append(f"[Q{q_id}]: {t}")
 
             if transcripts:
@@ -452,6 +460,21 @@ async def score_attempt(
                 f"- {c['name']} (max {c['max_score']}): {c.get('description', '')}"
                 for c in criteria
             )
+            # Build criteria_with_bands (same structure as grader.py _build_template_vars)
+            crit_band_parts = []
+            for c in criteria:
+                part = f"Criterion: {c['name']} (max {c['max_score']})\n  Description: {c.get('description', '')}"
+                cefr_descs = c.get('cefr_descriptors')
+                if cefr_descs:
+                    try:
+                        bands = json.loads(cefr_descs) if isinstance(cefr_descs, str) else cefr_descs
+                        band_text = "\n".join(f"  {level}: {desc}" for level, desc in bands.items())
+                        part += f"\n  CEFR bands:\n{band_text}"
+                    except Exception:
+                        pass
+                crit_band_parts.append(part)
+            criteria_with_bands = "\n\n".join(crit_band_parts)
+
             total_max_score = sum(c["max_score"] for c in criteria)
             max_score_single = max((c["max_score"] for c in criteria), default=10)
             template_vars = {
@@ -461,6 +484,7 @@ async def score_attempt(
                 "materials": all_materials,
                 **{f"material_{k}": v for k, v in materials_by_type.items()},
                 "criteria": crit_lines,
+                "criteria_with_bands": criteria_with_bands,
                 "submission": submission_for_vars,
                 "transcription": transcript or "",
                 "max_score": max_score_single,
@@ -672,7 +696,24 @@ async def get_attempt_result(
         select(AttemptResult).where(AttemptResult.attempt_id == attempt_id)
     )).scalar_one_or_none()
     if not ar:
-        raise HTTPException(404, "No scoring result yet — trigger scoring first")
+        scenario = (await session.execute(
+            select(Scenario).where(Scenario.id == attempt.scenario_id)
+        )).scalar_one_or_none()
+        return AttemptResultDetail(
+            attempt_id=str(attempt_id),
+            scenario_id=str(attempt.scenario_id),
+            scenario_title=scenario.title if scenario else "—",
+            status="pending",
+            started_at=attempt.started_at.isoformat() if attempt.started_at else None,
+            submitted_at=attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+            cefr_level="—",
+            overall_score=0.0,
+            overall_score_max=0.0,
+            band_score=None,
+            is_finalized=False,
+            teacher_notes=None,
+            task_results=[],
+        )
 
     scenario = (await session.execute(
         select(Scenario).where(Scenario.id == attempt.scenario_id)

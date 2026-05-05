@@ -341,41 +341,50 @@ export default function SpeakingRecorder({
             </div>
           )}
 
-          {/* Confirm recording button */}
+          {/* Playback + confirm/re-record controls */}
           {audioUrl && !isQuestionAnswered && (
-            <div className="mt-4 flex justify-center gap-4">
-              <button
-                onClick={() => resetRecording()}
-                disabled={isUploading || isTransitioning}
-                className="px-6 py-2 rounded-lg font-medium transition-colors
-                  bg-gray-200 text-gray-700 hover:bg-gray-300
-                  disabled:bg-gray-100 disabled:text-gray-400"
-              >
-                <X className="w-5 h-5 inline mr-2" />
-                Re-record
-              </button>
-              <button
-                onClick={handleConfirmRecording}
-                disabled={isTransitioning || isUploading}
-                className={`px-6 py-2 rounded-lg font-medium transition-colors
-                  ${isTransitioning || isUploading
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-green-600 text-white hover:bg-green-700'
-                  }
-                `}
-              >
-                {isTransitioning || isUploading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-5 h-5 inline mr-2" />
-                    Confirm Recording
-                  </>
-                )}
-              </button>
+            <div className="mt-4 space-y-3">
+              {/* Playback */}
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <p className="text-xs text-gray-500 mb-2 font-medium">录音回放 — 确认前可以先听一遍</p>
+                <audio src={audioUrl} controls className="w-full" />
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={() => resetRecording()}
+                  disabled={isUploading || isTransitioning}
+                  className="px-6 py-2 rounded-lg font-medium transition-colors
+                    bg-gray-200 text-gray-700 hover:bg-gray-300
+                    disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <X className="w-5 h-5 inline mr-2" />
+                  Re-record
+                </button>
+                <button
+                  onClick={handleConfirmRecording}
+                  disabled={isTransitioning || isUploading}
+                  className={`px-6 py-2 rounded-lg font-medium transition-colors
+                    ${isTransitioning || isUploading
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                    }
+                  `}
+                >
+                  {isTransitioning || isUploading ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-5 h-5 inline mr-2" />
+                      Confirm Recording
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
         </div>

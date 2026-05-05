@@ -178,6 +178,10 @@ export default function ResultPage() {
     }
     try {
       const r = await apiClient.get(`/scoring/attempt/${attemptId}/result`)
+      if (r.data.status === 'pending') {
+        triggerScoring()
+        return
+      }
       setResult(r.data); setPolling(false)
     } catch (err: any) {
       if (err?.response?.status === 404 || err?.response?.status === 400) triggerScoring()

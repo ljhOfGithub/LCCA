@@ -485,6 +485,16 @@ async def save_task_response(
     if not task_response:
         raise HTTPException(status_code=404, detail="Task response not found")
 
+    if task_response.submitted_at is not None:
+        return TaskResponseItem(
+            id=str(task_response.id),
+            task_id=str(task_response.task_id),
+            status=task_response.status.value,
+            content=task_response.content,
+            started_at=task_response.started_at,
+            submitted_at=task_response.submitted_at,
+        )
+
     task_response.content = data.content
     if task_response.status == TaskResponseStatus.NOT_STARTED:
         task_response.status = TaskResponseStatus.IN_PROGRESS

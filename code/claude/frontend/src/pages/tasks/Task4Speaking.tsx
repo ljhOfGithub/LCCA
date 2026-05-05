@@ -163,6 +163,26 @@ export default function Task4Speaking({
     await startRecording()
   }, [startRecording, resetRecording])
 
+  const handleReRecord = useCallback(() => {
+    if (!currentQuestion) return
+    resetRecording()
+    setRecordings((prev) => {
+      const next = { ...prev }
+      delete next[currentQuestion.id]
+      return next
+    })
+    setRecordingBlobUrls((prev) => {
+      const next = { ...prev }
+      delete next[currentQuestion.id]
+      return next
+    })
+    setRecordingDurations((prev) => {
+      const next = { ...prev }
+      delete next[currentQuestion.id]
+      return next
+    })
+  }, [currentQuestion, resetRecording])
+
   const handleStopRecording = useCallback(async () => {
     stopRecording()
   }, [stopRecording])
@@ -286,7 +306,7 @@ export default function Task4Speaking({
         {/* Recording Section */}
         <div className="flex-1">
           {isQuestionAnswered ? (
-            // Recording completed
+            // Recording confirmed — show playback + re-record option (unless task already submitted)
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <div className="flex items-center justify-center mb-4">
                 <div className="flex items-center gap-2 text-success-600">
@@ -294,7 +314,7 @@ export default function Task4Speaking({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="font-medium">Recording completed</span>
+                  <span className="font-medium">Recording saved</span>
                   <span className="text-xs text-gray-400 ml-2">
                     ({formatTime(recordingDurations[currentQuestion?.id] ?? duration)})
                   </span>
@@ -306,9 +326,16 @@ export default function Task4Speaking({
                 recordedDuration={recordingDurations[currentQuestion?.id] ?? duration}
               />
 
-              <p className="text-sm text-gray-500 text-center mt-4">
-                You cannot re-record once submitted. Please proceed to the next question.
-              </p>
+              {!disabled && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    onClick={handleReRecord}
+                    className="px-5 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    Re-record this question
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             // Recording controls
@@ -329,21 +356,34 @@ export default function Task4Speaking({
             </div>
           )}
 
-          {/* Confirm recording button */}
-          {audioUrl && !isQuestionAnswered && (
-            <div className="mt-4 flex justify-center">
-              <button
-                onClick={handleConfirmRecording}
-                disabled={isTransitioning || isUploading}
-                className={`px-6 py-2 rounded-lg font-medium transition-colors
-                  ${isTransitioning || isUploading
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-success-600 text-white hover:bg-success-700'
-                  }
-                `}
-              >
-                {isTransitioning || isUploading ? 'Saving...' : 'Confirm Recording'}
-              </button>
+          {/* After stopping: playback + re-record / confirm buttons */}
+          {audioUrl && !isQuestionAnswered && !isRecording && (
+            <div className="mt-4 space-y-3">
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <p className="text-xs text-gray-500 mb-2 font-medium">录音回放 — 确认前可以先听一遍</p>
+                <audio src={audioUrl} controls className="w-full" />
+              </div>
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={() => resetRecording()}
+                  disabled={isTransitioning || isUploading}
+                  className="px-5 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  Re-record
+                </button>
+                <button
+                  onClick={handleConfirmRecording}
+                  disabled={isTransitioning || isUploading}
+                  className={`px-6 py-2 rounded-lg font-medium transition-colors text-sm
+                    ${isTransitioning || isUploading
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-success-600 text-white hover:bg-success-700'
+                    }
+                  `}
+                >
+                  {isTransitioning || isUploading ? 'Saving...' : 'Confirm Recording'}
+                </button>
+              </div>
             </div>
           )}
         </div>

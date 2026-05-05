@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ProgressBar from '../components/ProgressBar'
 import Timer from '../components/Timer'
@@ -63,6 +63,7 @@ export default function ScenarioRunner() {
   const [taskPausedRemaining, setTaskPausedRemaining] = useState<Record<number, number>>({}) // saved remaining seconds on pause
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const initRef = useRef(false)  // prevent double-init in React Strict Mode
 
   const currentTask = tasks[currentTaskIndex]
   const allTasksCompleted = tasks.length > 0 && tasks.every((_, i) => taskStatuses[i] === 'completed')
@@ -86,7 +87,8 @@ export default function ScenarioRunner() {
   })
 
   useEffect(() => {
-    if (scenarioId) {
+    if (scenarioId && !initRef.current) {
+      initRef.current = true
       loadScenarioData()
     }
   }, [scenarioId])
@@ -195,26 +197,35 @@ export default function ScenarioRunner() {
 
   const handleTaskSubmit = async (taskIndex: number) => {
     const responseId = taskResponseIds[taskIndex]
-    if (!responseId || !attemptId) return
+    if (!responseId || !attemptId) {
+      console.error(`No response ID for task ${taskIndex}`)
+      return
+    }
 
     try {
-      // Force-flush any unsaved content before submitting so the backend has the latest value
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+      }
+
+      // Force-flush any unsaved content before submitting
       const currentContent = taskContents[taskIndex]
       if (currentContent !== undefined) {
         await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-          },
+          headers,
           body: JSON.stringify({ content: currentContent }),
         })
       }
 
-      await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}/submit`, {
+      const submitRes = await fetch(`/api/v1/attempts/${attemptId}/responses/${responseId}/submit`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
       })
+      if (!submitRes.ok) {
+        console.error(`Failed to submit task ${taskIndex}: ${submitRes.status}`)
+        return
+      }
 
       setTaskStatuses((prev) => ({ ...prev, [taskIndex]: 'completed' }))
 
@@ -224,7 +235,6 @@ export default function ScenarioRunner() {
         setTaskStartMs((prev) => ({ ...prev, [nextIndex]: Date.now() }))
         setCurrentTaskIndex(nextIndex)
       } else {
-        // All tasks done — submit the entire attempt automatically
         await handleSubmitAll()
       }
     } catch (error) {
@@ -365,7 +375,7 @@ export default function ScenarioRunner() {
             <Task1Reading
               advertisement={{
                 title: currentTask.title,
-                body: getMaterial(currentTask, 'advertisement')?.content || currentTask.description || '',
+                body: getMaterial(currentTask, 'advertisement')?.content || getMaterial(currentTask, 'job_description')?.content || currentTask.description || '',
               }}
               attemptId={attemptId!}
               taskId={currentTask.id}
@@ -373,7 +383,8 @@ export default function ScenarioRunner() {
               initialContent={taskContents[currentTaskIndex] || ''}
               timeLimit={currentTask.time_limit_seconds ?? undefined}
               initialTimeRemaining={getTimeRemaining(currentTaskIndex)}
-              onSubmit={() => handleTaskSubmit(currentTaskIndex)}
+              isSubmitted={taskStatuses[currentTaskIndex] === 'completed'}
+              onSubmit={taskStatuses[currentTaskIndex] === 'completed' ? undefined : () => handleTaskSubmit(currentTaskIndex)}
               saveResponse={saveTaskResponse}
               onContentChange={(content) =>
                 setTaskContents((prev) => ({ ...prev, [currentTaskIndex]: content }))
@@ -398,7 +409,8 @@ export default function ScenarioRunner() {
               initialContent={taskContents[currentTaskIndex] || ''}
               timeLimit={currentTask.time_limit_seconds ?? undefined}
               initialTimeRemaining={getTimeRemaining(currentTaskIndex)}
-              onSubmit={() => handleTaskSubmit(currentTaskIndex)}
+              isSubmitted={taskStatuses[currentTaskIndex] === 'completed'}
+              onSubmit={taskStatuses[currentTaskIndex] === 'completed' ? undefined : () => handleTaskSubmit(currentTaskIndex)}
               saveResponse={saveTaskResponse}
               onContentChange={(content) =>
                 setTaskContents((prev) => ({ ...prev, [currentTaskIndex]: content }))
@@ -441,7 +453,7 @@ export default function ScenarioRunner() {
                   setTaskPausedRemaining((prev) => ({ ...prev, [currentTaskIndex]: remaining }))
                 }
                 onComplete={() => handleTaskSubmit(currentTaskIndex)}
-                disabled={false}
+                disabled={taskStatuses[currentTaskIndex] === 'completed'}
               />
             )
           })()}
@@ -464,7 +476,7 @@ export default function ScenarioRunner() {
                 await saveTaskResponse(currentTaskIndex, content)
               }}
               onComplete={() => handleTaskSubmit(currentTaskIndex)}
-              disabled={false}
+              disabled={taskStatuses[currentTaskIndex] === 'completed'}
             />
           )}
 

@@ -43,9 +43,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
 
-    # ASR API
+    # ASR API (Whisper-compatible: OpenAI, Groq, etc.)
     asr_api_key: str = ""
-    asr_api_url: str = "https://api.example.com/asr"
+    asr_api_url: str = "https://api.openai.com/v1/audio/transcriptions"
+    asr_model: str = "whisper-1"
 
     # Frontend URL (for CORS)
     frontend_url: str = "http://localhost:3000"

@@ -154,14 +154,17 @@ function AttemptCard({ a, action }: { a: AttemptSummary; action: React.ReactNode
   )
 }
 
-// ── Student filter bar ─────────────────────────────────────────────────────────
+// ── Student + date filter bar ──────────────────────────────────────────────────
 
-function StudentFilter({ onFilter }: { onFilter: (num: string, name: string) => void }) {
+function StudentFilter({ onFilter }: { onFilter: (num: string, name: string, dateFrom: string, dateTo: string) => void }) {
   const [num, setNum] = useState('')
   const [name, setName] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
-  const apply = () => onFilter(num.trim(), name.trim())
-  const clear = () => { setNum(''); setName(''); onFilter('', '') }
+  const apply = () => onFilter(num.trim(), name.trim(), dateFrom, dateTo)
+  const clear = () => { setNum(''); setName(''); setDateFrom(''); setDateTo(''); onFilter('', '', '', '') }
+  const hasFilter = num || name || dateFrom || dateTo
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -171,11 +174,17 @@ function StudentFilter({ onFilter }: { onFilter: (num: string, name: string) => 
       <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && apply()}
         placeholder="Student name…"
         className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <span className="text-xs text-gray-400 ml-1">提交日期</span>
+      <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+        className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <span className="text-xs text-gray-400">—</span>
+      <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+        className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       <button onClick={apply}
         className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
         Search
       </button>
-      {(num || name) && (
+      {hasFilter && (
         <button onClick={clear} className="text-xs text-gray-500 hover:text-gray-700">Clear</button>
       )}
     </div>
@@ -192,16 +201,18 @@ function ReviewTab() {
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptDetail | null>(null)
   const [filterNum, setFilterNum] = useState('')
   const [filterName, setFilterName] = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
 
   useEffect(() => {
     apiClient.get('/teacher/published').then(r => {
       const list: Scenario[] = Array.isArray(r.data) ? r.data : (r.data.items || [])
       setScenarios(list)
-      if (list.length > 0) loadAttempts(list[0].id, '', '')
+      if (list.length > 0) loadAttempts(list[0].id, '', '', '', '')
     }).catch(console.error)
   }, [])
 
-  const loadAttempts = async (scenarioId: string, num: string, name: string) => {
+  const loadAttempts = async (scenarioId: string, num: string, name: string, dateFrom: string, dateTo: string) => {
     setSelectedScenarioId(scenarioId)
     setAttempts([])
     setSelectedAttempt(null)
@@ -211,16 +222,20 @@ function ReviewTab() {
       const params: Record<string, string> = {}
       if (num) params.student_number = num
       if (name) params.student_name = name
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
       const r = await apiClient.get(`/teacher/review/scenarios/${scenarioId}/attempts`, { params })
       setAttempts(r.data)
     } catch (e) { console.error(e) }
     finally { setLoadingAttempts(false) }
   }
 
-  const handleFilter = (num: string, name: string) => {
+  const handleFilter = (num: string, name: string, dateFrom: string, dateTo: string) => {
     setFilterNum(num)
     setFilterName(name)
-    if (selectedScenarioId) loadAttempts(selectedScenarioId, num, name)
+    setFilterDateFrom(dateFrom)
+    setFilterDateTo(dateTo)
+    if (selectedScenarioId) loadAttempts(selectedScenarioId, num, name, dateFrom, dateTo)
   }
 
   const loadAttemptDetail = async (attemptId: string) => {
@@ -234,7 +249,7 @@ function ReviewTab() {
     return (
       <AttemptReviewPanel
         attempt={selectedAttempt}
-        onBack={() => { setSelectedAttempt(null); loadAttempts(selectedScenarioId, filterNum, filterName) }}
+        onBack={() => { setSelectedAttempt(null); loadAttempts(selectedScenarioId, filterNum, filterName, filterDateFrom, filterDateTo) }}
         onReload={() => loadAttemptDetail(selectedAttempt.id)}
       />
     )
@@ -245,7 +260,7 @@ function ReviewTab() {
       <div className="flex items-center gap-4 mb-4 flex-wrap">
         <h2 className="text-lg font-semibold text-gray-800">Review Student Results</h2>
         <select value={selectedScenarioId}
-          onChange={e => { loadAttempts(e.target.value, filterNum, filterName) }}
+          onChange={e => { loadAttempts(e.target.value, filterNum, filterName, filterDateFrom, filterDateTo) }}
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">Select a scenario…</option>
           {scenarios.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}

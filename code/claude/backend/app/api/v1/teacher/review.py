@@ -49,6 +49,8 @@ async def list_scenario_attempts(
     student_number: str | None = Query(default=None, description="Filter by student number (partial match)"),
     student_name: str | None = Query(default=None, description="Filter by student name (partial match)"),
     status_filter: str | None = Query(default=None, alias="status", description="Filter by attempt status"),
+    date_from: str | None = Query(default=None, description="Filter submitted_at >= date (YYYY-MM-DD)"),
+    date_to: str | None = Query(default=None, description="Filter submitted_at <= date (YYYY-MM-DD)"),
 ):
     """List all attempts for a scenario. Teachers see all attempts (not just own scenarios)."""
     # Scenario must exist (but no ownership check — all teachers can review all)
@@ -73,6 +75,20 @@ async def list_scenario_attempts(
         query = query.where(User.full_name.ilike(f"%{student_name}%"))
     if status_filter:
         query = query.where(Attempt.status == status_filter)
+    if date_from:
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            query = query.where(Attempt.submitted_at >= dt)
+        except ValueError:
+            pass
+    if date_to:
+        from datetime import datetime, timezone, timedelta
+        try:
+            dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            query = query.where(Attempt.submitted_at < dt)
+        except ValueError:
+            pass
 
     query = query.order_by(Attempt.created_at.desc())
 
@@ -421,6 +437,7 @@ async def finalize_attempt(
 
 class ScoreRunLogEntry(BaseModel):
     score_run_id: str
+    attempt_id: str | None
     task_response_id: str
     task_id: str
     task_title: str
@@ -449,12 +466,24 @@ async def list_score_runs(
     per_page: int = Query(default=30, ge=1, le=100),
     task_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    student_number: str | None = Query(default=None),
+    student_name: str | None = Query(default=None),
+    scenario_title: str | None = Query(default=None),
 ):
     """List all LLM scoring runs in reverse-chronological order for the log page."""
+    from sqlalchemy import join as sa_join
+    from app.models.scenario import Scenario as ScenarioModel
+
     offset = (page - 1) * per_page
 
     query = (
         select(ScoreRun)
+        .join(TaskResponse, ScoreRun.task_response_id == TaskResponse.id)
+        .join(Task, TaskResponse.task_id == Task.id)
+        .join(Attempt, TaskResponse.attempt_id == Attempt.id)
+        .join(Student, Attempt.student_id == Student.id)
+        .join(User, Student.user_id == User.id)
+        .join(ScenarioModel, Task.scenario_id == ScenarioModel.id)
         .options(
             selectinload(ScoreRun.task_response)
             .selectinload(TaskResponse.task)
@@ -468,8 +497,17 @@ async def list_score_runs(
         .offset(offset)
         .limit(per_page)
     )
+
     if status:
         query = query.where(ScoreRun.status == status)
+    if task_type:
+        query = query.where(Task.task_type == task_type)
+    if student_number:
+        query = query.where(Student.student_number.ilike(f"%{student_number}%"))
+    if student_name:
+        query = query.where(User.full_name.ilike(f"%{student_name}%"))
+    if scenario_title:
+        query = query.where(ScenarioModel.title.ilike(f"%{scenario_title}%"))
 
     runs_r = await session.execute(query)
     runs = runs_r.scalars().all()
@@ -483,11 +521,10 @@ async def list_score_runs(
 
         task_type_val = getattr(task, "task_type", None) if task else None
         task_type_str = (task_type_val.value if hasattr(task_type_val, "value") else str(task_type_val)).lower() if task_type_val else ""
-        if task_type and task_type_str != task_type.lower():
-            continue
 
         entries.append(ScoreRunLogEntry(
             score_run_id=str(run.id),
+            attempt_id=str(attempt.id) if attempt else None,
             task_response_id=str(run.task_response_id),
             task_id=str(task.id) if task else "",
             task_title=task.title if task else "—",

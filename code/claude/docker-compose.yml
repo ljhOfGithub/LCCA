@@ -103,10 +103,10 @@ services:
       LLM_API_KEY: "sk-api-motj0siSdCkS4t-e17JTmB5C0J53sAwvdwXCkxQHhW9vnC7C5NdsCgzqJUhdLJQyXDsDgPW6xOdq41kHrNw6Q4l-V9QRDMMAGCAgNGZrl4g583wYDMplr88"
       LLM_BASE_URL: "https://api.minimax.chat/v1"
       LLM_MODEL: "MiniMax-Text-01"
-      # ── ASR provider ─────────────────────────────────────────────
-      # MiniMax ASR (Whisper-compatible endpoint)
-      ASR_API_KEY: "sk-api-motj0siSdCkS4t-e17JTmB5C0J53sAwvdwXCkxQHhW9vnC7C5NdsCgzqJUhdLJQyXDsDgPW6xOdq41kHrNw6Q4l-V9QRDMMAGCAgNGZrl4g583wYDMplr88"
-      ASR_API_URL: "https://api.minimax.chat/v1/audio/transcriptions"
+      # ── ASR provider (Groq Whisper — free at console.groq.com) ──
+      ASR_API_KEY: "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"
+      ASR_API_URL: "https://api.groq.com/openai/v1/audio/transcriptions"
+      ASR_MODEL: "whisper-large-v3-turbo"
     depends_on:
       postgres:
         condition: service_healthy
