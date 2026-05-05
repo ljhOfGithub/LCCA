@@ -15,7 +15,7 @@ from app.models.user import Teacher, User, Student
 from app.models.attempt import Attempt, AttemptStatus
 from app.models.scenario import Scenario, Task
 from app.models.scoring import ScoreRun, ScoreDetail, AttemptResult
-from app.core.auth_helpers import get_or_create_teacher_profile
+
 
 router = APIRouter()
 

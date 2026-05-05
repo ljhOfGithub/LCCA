@@ -51,7 +51,11 @@ async def get_current_user(
     from app.models.user import User
     result = await session.execute(
         select(User)
-        .options(selectinload(User.teacher), selectinload(User.student))
+        .options(
+            selectinload(User.admin),
+            selectinload(User.teacher),
+            selectinload(User.student),
+        )
         .where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
@@ -145,20 +149,15 @@ def require_admin():
 
 
 def get_user_role(user: "User") -> UserRole:
-    """Determine user's role from their profile."""
-    # Check if user is a teacher
-    if user.teacher is not None:
-        return UserRole.TEACHER
-
-    # Check if user is a student
-    if user.student is not None:
-        return UserRole.STUDENT
-
-    # Superusers are admins
+    """Determine user's role. Checks admins table first, then teacher, then student."""
+    if getattr(user, 'admin', None) is not None:
+        return UserRole.ADMIN
     if user.is_superuser:
         return UserRole.ADMIN
-
-    # Default to student if has student profile
+    if user.teacher is not None:
+        return UserRole.TEACHER
+    if user.student is not None:
+        return UserRole.STUDENT
     return UserRole.STUDENT
 
 

@@ -1,4 +1,4 @@
-"""User, Student, Teacher models."""
+"""User, Admin, Student, Teacher models."""
 import uuid
 from typing import TYPE_CHECKING
 
@@ -22,16 +22,26 @@ class User(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    admin: Mapped["Admin | None"] = relationship("Admin", back_populates="user", uselist=False)
     student: Mapped["Student | None"] = relationship("Student", back_populates="user", uselist=False)
     teacher: Mapped["Teacher | None"] = relationship("Teacher", back_populates="user", uselist=False)
 
     def verify_password(self, plain_password: str) -> bool:
-        """Verify password against stored hash."""
         return verify_password(plain_password, self.hashed_password)
 
     def set_password(self, password: str) -> None:
-        """Hash and set the user's password."""
         self.hashed_password = hash_password(password)
+
+
+class Admin(Base, UUIDMixin, TimestampMixin):
+    """Admin profile — exists for every user that has admin role."""
+    __tablename__ = "admins"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False, index=True
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="admin")
 
 
 class Student(Base, UUIDMixin, TimestampMixin):
@@ -55,4 +65,3 @@ class Teacher(Base, UUIDMixin, TimestampMixin):
     employee_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="teacher")
-    scenarios: Mapped[list["Scenario"]] = relationship("Scenario", back_populates="created_by")

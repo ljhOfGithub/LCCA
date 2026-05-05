@@ -32,6 +32,7 @@ from app.api.schemas.scenarios import (
     TaskListResponse,
 )
 from app.core.security import get_current_user, require_admin, require_teacher, require_student
+from app.core.auth_helpers import assert_can_modify_scenario
 from app.core.status import ScenarioStatus
 
 router = APIRouter()
@@ -58,20 +59,7 @@ async def list_scenarios(
         except ValueError:
             pass
 
-    # For teachers, filter by their scenarios
-    from app.core.security import get_user_role, UserRole
-    role = get_user_role(current_user)
-    if role != UserRole.ADMIN:
-        # Get teacher's ID
-        from app.models.user import Teacher
-        teacher_result = await session.execute(
-            select(Teacher.id).where(Teacher.user_id == current_user.id)
-        )
-        teacher_id = teacher_result.scalar_one_or_none()
-        if teacher_id:
-            query = query.where(Scenario.created_by_id == teacher_id)
-        else:
-            return ScenarioListResponse(items=[], total=0, page=page, per_page=per_page)
+    # Admin sees all scenarios (no ownership filter)
 
     # Count total
     all_results = await session.execute(query)
@@ -119,21 +107,10 @@ async def create_scenario(
 
     Only teachers and admins can create scenarios.
     """
-    from app.models.user import Teacher
-
-    # Get teacher profile
-    teacher_result = await session.execute(
-        select(Teacher).where(Teacher.user_id == current_user.id)
-    )
-    teacher = teacher_result.scalar_one_or_none()
-
-    if not teacher:
-        raise HTTPException(status_code=403, detail="Teacher profile not found")
-
     scenario = Scenario(
         title=data.title,
         description=data.description,
-        created_by_id=teacher.id,
+        created_by_id=current_user.id,
         status=ScenarioStatus.DRAFT,
     )
     session.add(scenario)
@@ -168,11 +145,7 @@ async def get_scenario(
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    # Authorization check
-    from app.core.security import get_user_role, UserRole
-    role = get_user_role(current_user)
-    if role != UserRole.ADMIN and scenario.created_by_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    assert_can_modify_scenario(current_user, scenario.created_by_id)
 
     tasks = [
         TaskResponse(
@@ -222,17 +195,7 @@ async def update_scenario(
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    # Authorization check
-    from app.core.security import get_user_role, UserRole
-    role = get_user_role(current_user)
-    if role != UserRole.ADMIN:
-        from app.models.user import Teacher
-        teacher_result = await session.execute(
-            select(Teacher.id).where(Teacher.user_id == current_user.id)
-        )
-        teacher_id = teacher_result.scalar_one_or_none()
-        if not teacher_id or scenario.created_by_id != teacher_id:
-            raise HTTPException(status_code=403, detail="Not authorized")
+    assert_can_modify_scenario(current_user, scenario.created_by_id)
 
     # Update fields
     if data.title is not None:
@@ -266,15 +229,6 @@ async def publish_scenario(
 
     Only admins can publish. Teachers can only submit for review.
     """
-    from app.core.security import get_user_role, UserRole
-
-    role = get_user_role(current_user)
-    if role != UserRole.ADMIN:
-        raise HTTPException(
-            status_code=403,
-            detail="Only admins can publish scenarios"
-        )
-
     result = await session.execute(
         select(Scenario).where(Scenario.id == scenario_id)
     )
@@ -322,11 +276,7 @@ async def add_task(
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    # Authorization
-    from app.core.security import get_user_role, UserRole
-    role = get_user_role(current_user)
-    if role != UserRole.ADMIN and scenario.created_by_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    assert_can_modify_scenario(current_user, scenario.created_by_id)
 
     # Get next sequence order
     max_order_result = await session.execute(
@@ -415,11 +365,6 @@ async def delete_scenario(
 
     Only admins can delete scenarios.
     """
-    from app.core.security import get_user_role, UserRole
-
-    role = get_user_role(current_user)
-    if role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only admins can delete scenarios")
 
     result = await session.execute(
         select(Scenario).where(Scenario.id == scenario_id)

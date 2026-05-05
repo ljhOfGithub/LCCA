@@ -69,6 +69,7 @@ async def login(
     # Find user by email
     result = await session.execute(
         select(User).where(User.email == login_data.email).options(
+            selectinload(User.admin),
             selectinload(User.teacher),
             selectinload(User.student),
         )
@@ -95,9 +96,11 @@ async def login(
             detail="User account is inactive",
         )
 
-    # Determine role
-    role = "admin"
-    if user.teacher is not None:
+    # Determine role — admins table takes precedence
+    role = "student"
+    if user.admin is not None or user.is_superuser:
+        role = "admin"
+    elif user.teacher is not None:
         role = "teacher"
     elif user.student is not None:
         role = "student"
@@ -165,8 +168,10 @@ async def register(
 
 
 def _build_user_response(current_user: User) -> UserResponse:
-    role = "admin"
-    if current_user.teacher is not None:
+    role = "student"
+    if getattr(current_user, 'admin', None) is not None or current_user.is_superuser:
+        role = "admin"
+    elif current_user.teacher is not None:
         role = "teacher"
     elif current_user.student is not None:
         role = "student"

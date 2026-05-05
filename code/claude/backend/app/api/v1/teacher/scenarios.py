@@ -1,4 +1,9 @@
-"""Scenario and Task management endpoints for teachers."""
+"""Scenario and Task management endpoints.
+
+Who can do what:
+  Admin  (is_superuser) — full CRUD, owns scenarios via user.id
+  Teacher                — list published scenarios only; no create/edit
+"""
 from typing import List
 from uuid import UUID
 
@@ -8,16 +13,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.security import get_current_user, require_teacher, require_admin
+from app.core.security import get_current_user, require_admin, require_teacher
 from app.core.status import ScenarioStatus, TaskType
+from app.core.auth_helpers import assert_can_modify_scenario
 from app.db.session import get_session
 from app.models.scenario import Material, Scenario, Task
-from app.models.user import Teacher, User
+from app.models.user import User
 
 router = APIRouter()
 
 
-# Pydantic schemas
+# ── Pydantic schemas ────────────────────────────────────────────────────────────
 
 class MaterialResponse(BaseModel):
     id: str
@@ -26,15 +32,7 @@ class MaterialResponse(BaseModel):
     content: str | None
     storage_key: str | None
     metadata_json: str | None
-
     model_config = {"from_attributes": True}
-
-
-class MaterialCreate(BaseModel):
-    material_type: str = Field(..., min_length=1, max_length=50)
-    content: str | None = None
-    storage_key: str | None = None
-    metadata_json: str | None = None
 
 
 class TaskCreate(BaseModel):
@@ -63,7 +61,6 @@ class TaskResponse(BaseModel):
     time_limit_seconds: int | None
     weight: float = 1.0
     materials: List[MaterialResponse] = Field(default_factory=list)
-
     model_config = {"from_attributes": True}
 
 
@@ -86,11 +83,13 @@ class ScenarioResponse(BaseModel):
     status: ScenarioStatus
     created_by_id: str
     tasks: List[TaskResponse] = Field(default_factory=list)
-
     model_config = {"from_attributes": True}
 
 
-# Helpers
+# ── Helpers ─────────────────────────────────────────────────────────────────────
+
+_TASKS_WITH_MATERIALS = selectinload(Scenario.tasks).selectinload(Task.materials)
+
 
 def _task_response(t: Task) -> TaskResponse:
     return TaskResponse(
@@ -127,23 +126,7 @@ def _scenario_response(s: Scenario) -> ScenarioResponse:
     )
 
 
-_TASKS_WITH_MATERIALS = selectinload(Scenario.tasks).selectinload(Task.materials)
-
-
-async def get_teacher_profile(user: User, session: AsyncSession) -> Teacher:
-    result = await session.execute(select(Teacher).where(Teacher.user_id == user.id))
-    teacher = result.scalar_one_or_none()
-    if not teacher:
-        if user.is_superuser:
-            # Auto-create a teacher profile for admin users so they can own scenarios
-            teacher = Teacher(user_id=user.id)
-            session.add(teacher)
-            await session.flush()
-            await session.refresh(teacher)
-            return teacher
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a teacher")
-    return teacher
-
+# ── Public (any authenticated user) ────────────────────────────────────────────
 
 @router.get("/published", response_model=List[ScenarioResponse])
 async def list_published_scenarios(
@@ -154,18 +137,20 @@ async def list_published_scenarios(
     result = await session.execute(
         select(Scenario)
         .options(_TASKS_WITH_MATERIALS)
-        .where(Scenario.status == ScenarioStatus.PUBLISHED.value)
+        .where(Scenario.status == ScenarioStatus.PUBLISHED)
         .order_by(Scenario.created_at.desc())
     )
     return [_scenario_response(s) for s in result.scalars().all()]
 
 
+# ── Admin-only CRUD ─────────────────────────────────────────────────────────────
+
 @router.get("/scenarios", response_model=List[ScenarioResponse])
 async def list_scenarios(
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_admin()),
+    _: User = Depends(require_teacher()),
 ):
-    """List all scenarios (admin sees all)."""
+    """List all scenarios. Visible to both admin and teachers (no ownership filter)."""
     result = await session.execute(
         select(Scenario)
         .options(_TASKS_WITH_MATERIALS)
@@ -180,13 +165,12 @@ async def create_scenario(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_admin()),
 ):
-    """Create a new scenario."""
-    teacher = await get_teacher_profile(current_user, session)
+    """Create a new scenario. Admin only. Ownership = admin's user.id."""
     scenario = Scenario(
         title=scenario_data.title,
         description=scenario_data.description,
         status=scenario_data.status,
-        created_by_id=teacher.id,
+        created_by_id=current_user.id,
     )
     session.add(scenario)
     await session.commit()
@@ -204,13 +188,11 @@ async def create_scenario(
 async def get_scenario(
     scenario_id: UUID,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
-    """Get a specific scenario by ID."""
+    """Get a specific scenario by ID (any authenticated user)."""
     result = await session.execute(
-        select(Scenario)
-        .options(_TASKS_WITH_MATERIALS)
-        .where(Scenario.id == scenario_id)
+        select(Scenario).options(_TASKS_WITH_MATERIALS).where(Scenario.id == scenario_id)
     )
     scenario = result.scalar_one_or_none()
     if not scenario:
@@ -225,20 +207,16 @@ async def update_scenario(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_admin()),
 ):
-    """Update a scenario."""
+    """Update a scenario. Admin only."""
     result = await session.execute(
-        select(Scenario)
-        .options(_TASKS_WITH_MATERIALS)
-        .where(Scenario.id == scenario_id)
+        select(Scenario).options(_TASKS_WITH_MATERIALS).where(Scenario.id == scenario_id)
     )
     scenario = result.scalar_one_or_none()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if not current_user.is_superuser:
-        teacher = await get_teacher_profile(current_user, session)
-        if scenario.created_by_id != teacher.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                detail="You do not have permission to update this scenario")
+
+    # Non-superuser admin check (if we ever add non-super admins later)
+    assert_can_modify_scenario(current_user, scenario.created_by_id)
 
     if scenario_data.title is not None:
         scenario.title = scenario_data.title
@@ -262,19 +240,12 @@ async def delete_scenario(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_admin()),
 ):
-    """Delete a scenario and all its tasks."""
+    """Delete a scenario. Admin only."""
     result = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     scenario = result.scalar_one_or_none()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if not current_user.is_superuser:
-        teacher = await get_teacher_profile(current_user, session)
-        if scenario.created_by_id != teacher.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                detail="You do not have permission to delete this scenario")
-    if scenario.attempts:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Cannot delete scenario with existing attempts")
+    assert_can_modify_scenario(current_user, scenario.created_by_id)
     await session.delete(scenario)
     await session.commit()
 
@@ -285,7 +256,7 @@ async def list_tasks(
     session: AsyncSession = Depends(get_session),
     _: User = Depends(get_current_user),
 ):
-    """List all tasks for a scenario."""
+    """List all tasks for a scenario (any authenticated user)."""
     result = await session.execute(
         select(Task)
         .options(selectinload(Task.materials))
@@ -295,28 +266,6 @@ async def list_tasks(
     return [_task_response(t) for t in result.scalars().all()]
 
 
-@router.get("/scenarios/{scenario_id}/tasks/{task_index}", response_model=TaskResponse)
-async def get_task_by_index(
-    scenario_id: UUID,
-    task_index: int,
-    session: AsyncSession = Depends(get_session),
-    _: User = Depends(get_current_user),
-):
-    """Get a task by its 0-based index (sequence order position)."""
-    result = await session.execute(
-        select(Task)
-        .options(selectinload(Task.materials))
-        .where(Task.scenario_id == scenario_id)
-        .order_by(Task.sequence_order)
-        .offset(task_index)
-        .limit(1)
-    )
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return _task_response(task)
-
-
 @router.post("/scenarios/{scenario_id}/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def add_task(
     scenario_id: UUID,
@@ -324,19 +273,14 @@ async def add_task(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_admin()),
 ):
-    """Add a new task to a scenario."""
+    """Add a new task to a scenario. Admin only."""
     result = await session.execute(select(Scenario).where(Scenario.id == scenario_id))
     scenario = result.scalar_one_or_none()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    if not current_user.is_superuser:
-        teacher = await get_teacher_profile(current_user, session)
-        if scenario.created_by_id != teacher.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                detail="You do not have permission to add tasks to this scenario")
+    assert_can_modify_scenario(current_user, scenario.created_by_id)
     if scenario.status != ScenarioStatus.DRAFT:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Can only add tasks to draft scenarios")
+        raise HTTPException(status_code=400, detail="Can only add tasks to draft scenarios")
 
     task = Task(
         scenario_id=scenario.id,

@@ -23,11 +23,10 @@ class Scenario(Base, UUIDMixin, TimestampMixin):
     )
 
     created_by_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("teachers.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
 
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="scenario", lazy="selectin")
-    created_by: Mapped["Teacher"] = relationship("Teacher", back_populates="scenarios")
 
 
 class Task(Base, UUIDMixin, TimestampMixin):
