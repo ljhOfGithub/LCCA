@@ -131,12 +131,19 @@ export default function ScenarioRunner() {
         return
       }
 
-      // Load task response IDs from backend
-      await loadTaskResponses(aid, rawTasks)
+      // Load task response IDs from backend (returns statuses as loaded from server)
+      const loadedStatuses = await loadTaskResponses(aid, rawTasks)
 
-      // Mark first task as in_progress and record its start time
-      setTaskStatuses((prev) => ({ ...prev, 0: 'in_progress' }))
+      // Ensure task 0 is at least 'in_progress' — but never downgrade a completed task
+      setTaskStatuses((prev) => ({
+        ...prev,
+        0: prev[0] === 'not_started' ? 'in_progress' : prev[0],
+      }))
       setTaskStartMs((prev) => ({ ...prev, 0: Date.now() }))
+
+      // Navigate to first non-completed task so the user lands on actionable content
+      const firstActive = rawTasks.findIndex((_, i) => (loadedStatuses[i] ?? 'not_started') !== 'completed')
+      setCurrentTaskIndex(firstActive >= 0 ? firstActive : 0)
 
       start()
     } catch (error) {
@@ -146,7 +153,10 @@ export default function ScenarioRunner() {
     }
   }
 
-  const loadTaskResponses = async (aid: string, taskList: Task[]) => {
+  const loadTaskResponses = async (
+    aid: string,
+    taskList: Task[],
+  ): Promise<Record<number, string>> => {
     try {
       const res = await fetch(`/api/v1/attempts/${aid}/responses`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
@@ -167,11 +177,26 @@ export default function ScenarioRunner() {
           }
         }
       })
+
+      // After the last completed task, unlock the next one so sidebar navigation works
+      const maxCompletedIndex = Object.entries(newStatuses)
+        .filter(([, s]) => s === 'completed')
+        .map(([i]) => parseInt(i))
+        .reduce((max, i) => Math.max(max, i), -1)
+      if (maxCompletedIndex >= 0 && maxCompletedIndex + 1 < taskList.length) {
+        const nextIdx = maxCompletedIndex + 1
+        if (!newStatuses[nextIdx] || newStatuses[nextIdx] === 'not_started') {
+          newStatuses[nextIdx] = 'in_progress'
+        }
+      }
+
       setTaskResponseIds((prev) => ({ ...prev, ...newIds }))
       setTaskStatuses((prev) => ({ ...prev, ...newStatuses }))
       setTaskContents((prev) => ({ ...prev, ...newContents }))
+      return newStatuses
     } catch (error) {
       console.error('Failed to load task responses:', error)
+      return {}
     }
   }
 
@@ -196,6 +221,12 @@ export default function ScenarioRunner() {
   }
 
   const handleTaskSubmit = async (taskIndex: number) => {
+    // Require previous task to be completed before submitting this one
+    if (taskIndex > 0 && taskStatuses[taskIndex - 1] !== 'completed') {
+      alert(`Please submit Task ${taskIndex} before submitting Task ${taskIndex + 1}.`)
+      return
+    }
+
     const responseId = taskResponseIds[taskIndex]
     if (!responseId || !attemptId) {
       console.error(`No response ID for task ${taskIndex}`)
@@ -229,14 +260,15 @@ export default function ScenarioRunner() {
 
       setTaskStatuses((prev) => ({ ...prev, [taskIndex]: 'completed' }))
 
+      // Unlock next task in sidebar only if it hasn't been started yet
       const nextIndex = taskIndex + 1
       if (nextIndex < tasks.length) {
-        setTaskStatuses((prev) => ({ ...prev, [nextIndex]: 'in_progress' }))
-        setTaskStartMs((prev) => ({ ...prev, [nextIndex]: Date.now() }))
-        setCurrentTaskIndex(nextIndex)
-      } else {
-        await handleSubmitAll()
+        setTaskStatuses((prev) => ({
+          ...prev,
+          [nextIndex]: prev[nextIndex] === 'not_started' ? 'in_progress' : prev[nextIndex],
+        }))
       }
+      // Student navigates via sidebar — no auto-navigation
     } catch (error) {
       console.error('Failed to submit task:', error)
     }
@@ -274,13 +306,11 @@ export default function ScenarioRunner() {
 
   const handleTaskClick = (taskId: string) => {
     const taskIndex = tasks.findIndex((t) => t.id === taskId)
-    if (taskIndex !== -1 && taskStatuses[taskIndex] !== 'not_started') {
-      // Record start time only if first time entering this task
-      if (!taskStartMs[taskIndex]) {
-        setTaskStartMs((prev) => ({ ...prev, [taskIndex]: Date.now() }))
-      }
-      setCurrentTaskIndex(taskIndex)
+    if (taskIndex === -1) return
+    if (!taskStartMs[taskIndex]) {
+      setTaskStartMs((prev) => ({ ...prev, [taskIndex]: Date.now() }))
     }
+    setCurrentTaskIndex(taskIndex)
   }
 
   const progressTasks = tasks.map((task, index) => ({

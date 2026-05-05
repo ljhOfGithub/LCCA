@@ -548,9 +548,15 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                   {task.materials.map((m, i) => (
                     <div key={i} className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs font-medium text-gray-400 mb-1 capitalize">{m.material_type.replace('_', ' ')}</p>
-                      {m.content && <p className="text-sm text-gray-700 whitespace-pre-wrap">{m.content}</p>}
-                      {!m.content && m.storage_key && (
-                        <p className="text-xs text-gray-400 italic">File: {m.storage_key.split('/').pop()}</p>
+                      {m.material_type === 'audio' ? (
+                        <audio controls src={m.content ?? undefined} className="w-full mt-1 rounded" />
+                      ) : (
+                        <>
+                          {m.content && <p className="text-sm text-gray-700 whitespace-pre-wrap">{m.content}</p>}
+                          {!m.content && m.storage_key && (
+                            <p className="text-xs text-gray-400 italic">File: {m.storage_key.split('/').pop()}</p>
+                          )}
+                        </>
                       )}
                     </div>
                   ))}

@@ -6,6 +6,7 @@ interface AudioPlayerProps {
   onReplayUsed?: () => void
   replayAvailable?: boolean
   disabled?: boolean
+  disableSeek?: boolean
 }
 
 export default function AudioPlayer({
@@ -14,6 +15,7 @@ export default function AudioPlayer({
   onReplayUsed,
   replayAvailable = true,
   disabled = false,
+  disableSeek = false,
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -168,24 +170,31 @@ export default function AudioPlayer({
 
       {/* Progress Bar */}
       <div className="space-y-2">
-        <input
-          type="range"
-          min="0"
-          max={duration || 100}
-          value={currentTime}
-          onChange={handleSeek}
-          disabled={disabled}
-          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer
-            disabled:opacity-50 disabled:cursor-not-allowed
-            [&::-webkit-slider-thumb]:appearance-none
-            [&::-webkit-slider-thumb]:w-4
-            [&::-webkit-slider-thumb]:h-4
-            [&::-webkit-slider-thumb]:rounded-full
-            [&::-webkit-slider-thumb]:bg-primary-600"
-          style={{
-            background: `linear-gradient(to right, #2563eb ${progress}%, #e5e7eb ${progress}%)`,
-          }}
-        />
+        {disableSeek ? (
+          <div
+            className="w-full h-2 rounded-lg"
+            style={{ background: `linear-gradient(to right, #2563eb ${progress}%, #e5e7eb ${progress}%)` }}
+          />
+        ) : (
+          <input
+            type="range"
+            min="0"
+            max={duration || 100}
+            value={currentTime}
+            onChange={handleSeek}
+            disabled={disabled}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer
+              disabled:opacity-50 disabled:cursor-not-allowed
+              [&::-webkit-slider-thumb]:appearance-none
+              [&::-webkit-slider-thumb]:w-4
+              [&::-webkit-slider-thumb]:h-4
+              [&::-webkit-slider-thumb]:rounded-full
+              [&::-webkit-slider-thumb]:bg-primary-600"
+            style={{
+              background: `linear-gradient(to right, #2563eb ${progress}%, #e5e7eb ${progress}%)`,
+            }}
+          />
+        )}
 
         {/* Time Display */}
         <div className="flex justify-between text-sm text-gray-500">

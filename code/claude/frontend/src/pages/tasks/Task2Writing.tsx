@@ -44,7 +44,11 @@ export default function Task2Writing({
   useEffect(() => {
     setResponse(initialContent)
   }, [initialContent])
-  const [activeTab, setActiveTab] = useState<ReferenceTab>('resume')
+  const [activeTab, setActiveTab] = useState<ReferenceTab>(() => {
+    if (referenceMaterials.resume) return 'resume'
+    if (referenceMaterials.job_description) return 'job_description'
+    return 'notes'
+  })
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState<number | null>(
@@ -114,8 +118,16 @@ export default function Task2Writing({
     }
   }, [response])
 
+  // Stop countdown when submitted
+  useEffect(() => {
+    if (isSubmitted && countdownRef.current) {
+      clearInterval(countdownRef.current)
+      countdownRef.current = null
+    }
+  }, [isSubmitted])
+
   const handleAutoSave = async () => {
-    if (!response.trim() || response === '<p></p>') return
+    if (isSubmitted || !response.trim() || response === '<p></p>') return
 
     setIsSaving(true)
     try {
@@ -132,11 +144,12 @@ export default function Task2Writing({
     await handleAutoSave()
   }
 
-  const tabs: { key: ReferenceTab; label: string; content?: string }[] = [
+  const allTabs: { key: ReferenceTab; label: string; content?: string }[] = [
     { key: 'resume', label: 'Resume', content: referenceMaterials.resume },
     { key: 'job_description', label: 'Job Description', content: referenceMaterials.job_description },
     { key: 'notes', label: 'Notes', content: referenceMaterials.notes },
   ]
+  const tabs = allTabs.filter((t) => Boolean(t.content))
 
   return (
     <div className="h-full flex flex-col">
@@ -169,12 +182,14 @@ export default function Task2Writing({
               Last saved: {lastSaved.toLocaleTimeString()}
             </span>
           ) : null}
-          <button
-            onClick={handleManualSave}
-            className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-          >
-            Save Now
-          </button>
+          {!isSubmitted && (
+            <button
+              onClick={handleManualSave}
+              className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              Save Now
+            </button>
+          )}
         </div>
         </div>
       </div>

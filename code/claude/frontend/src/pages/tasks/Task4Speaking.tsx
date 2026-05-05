@@ -190,9 +190,7 @@ export default function Task4Speaking({
   const handleConfirmRecording = useCallback(async () => {
     if (!currentQuestion || !audioUrl) return
 
-    // Snapshot the blob URL before upload (uploadRecording might clear it)
     const blobUrlSnapshot = audioUrl
-
     setIsTransitioning(true)
     try {
       const storageKey = await uploadRecording(attemptId, taskId)
@@ -206,12 +204,25 @@ export default function Task4Speaking({
       if (saveResponse) {
         await saveResponse(JSON.stringify({ recordingMap: newRecordings })).catch(console.error)
       }
+
+      // Auto-submit when the last question is confirmed
+      const allDone = questions.every((q) => newRecordings[q.id] !== undefined)
+      if (allDone) {
+        setIsSubmitting(true)
+        try {
+          const audioKeys = questions.map((q) => newRecordings[q.id])
+          await onSubmit(audioKeys)
+          onComplete()
+        } finally {
+          setIsSubmitting(false)
+        }
+      }
     } catch (err) {
       console.error('Failed to save recording:', err)
     } finally {
       setIsTransitioning(false)
     }
-  }, [currentQuestion, audioUrl, uploadRecording, attemptId, taskId, recordings, saveResponse])
+  }, [currentQuestion, audioUrl, uploadRecording, attemptId, taskId, recordings, duration, saveResponse, questions, onSubmit, onComplete])
 
   const handleNextQuestion = () => {
     if (currentQuestionIndex < questions.length - 1) {
@@ -220,12 +231,6 @@ export default function Task4Speaking({
     }
   }
 
-  const handlePreviousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex((prev) => prev - 1)
-      resetRecording()
-    }
-  }
 
   const handleSubmitAll = async () => {
     if (isAllAnswered && !isSubmitting) {
@@ -390,58 +395,9 @@ export default function Task4Speaking({
       </div>
 
       {/* Navigation Footer */}
-      <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-        {/* Previous Button */}
-        <button
-          onClick={handlePreviousQuestion}
-          disabled={currentQuestionIndex === 0}
-          className={`px-4 py-2 rounded-lg transition-colors
-            ${currentQuestionIndex === 0
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }
-          `}
-        >
-          <span className="flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M15 19l-7-7 7-7" />
-            </svg>
-            Previous
-          </span>
-        </button>
-
-        {/* Next/Submit Button */}
-        {isLastQuestion ? (
-          <button
-            onClick={handleSubmitAll}
-            disabled={!isAllAnswered || isSubmitting}
-            className={`px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2
-              ${isAllAnswered && !isSubmitting
-                ? 'bg-primary-600 text-white hover:bg-primary-700'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              }
-            `}
-          >
-            {isSubmitting ? (
-              <>
-                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Submitting...
-              </>
-            ) : (
-              <>
-                Submit All
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </>
-            )}
-          </button>
-        ) : (
+      <div className="flex items-center justify-end pt-4 border-t border-gray-200">
+        {/* Next Button — only shown when there are more questions */}
+        {!isLastQuestion && (
           <button
             onClick={handleNextQuestion}
             disabled={!isQuestionAnswered}

@@ -108,8 +108,16 @@ export default function Task1Reading({
     }
   }, [notes])
 
+  // Stop countdown when submitted
+  useEffect(() => {
+    if (isSubmitted && countdownRef.current) {
+      clearInterval(countdownRef.current)
+      countdownRef.current = null
+    }
+  }, [isSubmitted])
+
   const handleAutoSave = async () => {
-    if (!notes.trim()) return
+    if (isSubmitted || !notes.trim()) return
 
     setIsSaving(true)
     try {
@@ -157,12 +165,14 @@ export default function Task1Reading({
               Last saved: {lastSaved.toLocaleTimeString()}
             </span>
           ) : null}
-          <button
-            onClick={handleManualSave}
-            className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-          >
-            Save Now
-          </button>
+          {!isSubmitted && (
+            <button
+              onClick={handleManualSave}
+              className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              Save Now
+            </button>
+          )}
         </div>
         </div>
       </div>

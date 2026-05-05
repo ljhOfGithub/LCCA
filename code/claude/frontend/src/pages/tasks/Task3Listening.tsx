@@ -183,6 +183,7 @@ export default function Task3Listening({
           onReplayUsed={handleReplayUsed}
           replayAvailable={!hasUsedReplay}
           disabled={disabled || isSubmitting}
+          disableSeek={true}
         />
       </div>
 

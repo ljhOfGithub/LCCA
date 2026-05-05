@@ -79,7 +79,7 @@ export default function NotesEditor({
           )}
 
           {/* Manual Save Button */}
-          {autoSave && onAutoSave && (
+          {autoSave && onAutoSave && !disabled && (
             <button
               onClick={handleManualSave}
               disabled={isSaving || !value.trim()}

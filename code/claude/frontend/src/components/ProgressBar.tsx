@@ -60,10 +60,8 @@ export default function ProgressBar({
             >
               <button
                 onClick={() => onTaskClick?.(task.id, task.status)}
-                disabled={task.status === 'not_started'}
-                className={`w-full text-left p-3 rounded-lg border-2 transition-all
+                className={`w-full text-left p-3 rounded-lg border-2 transition-all hover:shadow-md cursor-pointer
                   ${styles.border} ${styles.bg}
-                  ${task.status !== 'not_started' ? 'hover:shadow-md cursor-pointer' : 'cursor-not-allowed opacity-60'}
                   ${isCurrent ? 'ring-2 ring-primary-500' : ''}
                 `}
               >
