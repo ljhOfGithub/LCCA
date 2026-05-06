@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, ForeignKey, Enum as SAEnum, DateTime, func
+from sqlalchemy import String, Text, ForeignKey, Enum as SAEnum, DateTime, Boolean, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,7 @@ class Attempt(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
+    is_practice: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -32,10 +32,14 @@ export default function ScenarioList() {
   const [error, setError] = useState<string | null>(null)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userName, setUserName] = useState('')
-  // Maps scenario_id → attempt_id for submitted/scored attempts
+  // Maps scenario_id → attempt_id for submitted/scored exam attempts
   const [submittedAttempts, setSubmittedAttempts] = useState<Map<string, string>>(new Map())
-  // Maps scenario_id → attempt_id for in-progress/created attempts
+  // Maps scenario_id → attempt_id for in-progress/created exam attempts
   const [inProgressAttempts, setInProgressAttempts] = useState<Map<string, string>>(new Map())
+  // Maps scenario_id → list of practice attempt IDs (most recent first)
+  const [practiceHistory, setPracticeHistory] = useState<Map<string, string[]>>(new Map())
+  // Maps scenario_id → attempt_id for in-progress/created practice attempts
+  const [inProgressPracticeAttempts, setInProgressPracticeAttempts] = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) { navigate('/login'); return }
@@ -49,10 +53,20 @@ export default function ScenarioList() {
 
     loadScenarios()
 
-    const mergeAttempts = (items: { id: string; scenario_id: string }[]) => {
+    // Only exam (non-practice) submitted attempts block the "Start Assessment" button.
+    // Practice attempts are collected into practiceHistory.
+    const mergeAttempts = (items: { id: string; scenario_id: string; is_practice?: boolean }[]) => {
       setSubmittedAttempts(prev => {
         const next = new Map(prev)
-        items.forEach(a => next.set(a.scenario_id, a.id))
+        items.filter(a => !a.is_practice).forEach(a => next.set(a.scenario_id, a.id))
+        return next
+      })
+      setPracticeHistory(prev => {
+        const next = new Map(prev)
+        items.filter(a => a.is_practice).forEach(a => {
+          const existing = next.get(a.scenario_id) || []
+          if (!existing.includes(a.id)) next.set(a.scenario_id, [...existing, a.id])
+        })
         return next
       })
     }
@@ -65,10 +79,16 @@ export default function ScenarioList() {
       mergeAttempts(r.data.items || [])
     }).catch(() => {})
 
-    const mergeInProgress = (items: { id: string; scenario_id: string }[]) => {
+    // Exam in-progress → "Continue Assessment"; practice in-progress → "Resume Practice"
+    const mergeInProgress = (items: { id: string; scenario_id: string; is_practice?: boolean }[]) => {
       setInProgressAttempts(prev => {
         const next = new Map(prev)
-        items.forEach(a => next.set(a.scenario_id, a.id))
+        items.filter(a => !a.is_practice).forEach(a => next.set(a.scenario_id, a.id))
+        return next
+      })
+      setInProgressPracticeAttempts(prev => {
+        const next = new Map(prev)
+        items.filter(a => a.is_practice).forEach(a => next.set(a.scenario_id, a.id))
         return next
       })
     }
@@ -128,10 +148,12 @@ export default function ScenarioList() {
               </p>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500">{userName || 'Student'}</span>
-              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium text-sm">
-                {(userName || 'S')[0].toUpperCase()}
-              </div>
+              <Link to="/profile" className="flex items-center gap-2 hover:opacity-80">
+                <span className="text-sm text-gray-500">{userName || 'Student'}</span>
+                <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium text-sm">
+                  {(userName || 'S')[0].toUpperCase()}
+                </div>
+              </Link>
               <button onClick={handleLogout}
                 className="text-sm text-gray-500 hover:text-gray-700 border border-gray-300 px-3 py-1 rounded-lg">
                 Logout
@@ -202,7 +224,7 @@ export default function ScenarioList() {
                         {scenario.title}
                       </h3>
                       <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium flex-shrink-0
                           ${status.bg} ${status.text}`}
                       >
                         {status.label}
@@ -254,7 +276,7 @@ export default function ScenarioList() {
                   </div>
 
                   {/* Card Footer */}
-                  <div className="px-6 py-4 border-t border-gray-100">
+                  <div className="px-6 py-4 border-t border-gray-100 flex flex-col gap-3">
                     {submittedAttempts.has(scenario.id) ? (
                       <div className="flex flex-col gap-2">
                         <div className="w-full flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg text-sm
@@ -275,6 +297,21 @@ export default function ScenarioList() {
                               d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                           </svg>
                           View Results
+                        </Link>
+                        <Link
+                          to={`/exam/${scenario.id}?mode=practice`}
+                          className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+                            transition-colors text-sm ${inProgressPracticeAttempts.has(scenario.id)
+                              ? 'bg-amber-500 text-white hover:bg-amber-600'
+                              : 'bg-purple-600 text-white hover:bg-purple-700'}`}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d={inProgressPracticeAttempts.has(scenario.id)
+                                ? "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z"
+                                : "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"} />
+                          </svg>
+                          {inProgressPracticeAttempts.has(scenario.id) ? 'Resume Practice' : 'Practice'}
                         </Link>
                       </div>
                     ) : inProgressAttempts.has(scenario.id) ? (
@@ -300,20 +337,72 @@ export default function ScenarioList() {
                         </Link>
                       </div>
                     ) : (
-                      <Link
-                        to={`/exam/${scenario.id}`}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
-                          bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Start Assessment
-                      </Link>
+                      <div className="flex flex-col gap-2">
+                        <Link
+                          to={`/exam/${scenario.id}`}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+                            bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          Start Assessment
+                        </Link>
+                        <Link
+                          to={`/exam/${scenario.id}?mode=practice`}
+                          className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+                            transition-colors text-sm ${inProgressPracticeAttempts.has(scenario.id)
+                              ? 'bg-amber-500 text-white hover:bg-amber-600'
+                              : 'bg-purple-600 text-white hover:bg-purple-700'}`}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d={inProgressPracticeAttempts.has(scenario.id)
+                                ? "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z"
+                                : "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"} />
+                          </svg>
+                          {inProgressPracticeAttempts.has(scenario.id) ? 'Resume Practice' : 'Practice'}
+                        </Link>
+                      </div>
                     )}
+
+                    {/* Practice History */}
+                    {practiceHistory.has(scenario.id) && (() => {
+                      const ids = practiceHistory.get(scenario.id)!
+                      const shown = ids.slice(0, 3)
+                      return (
+                        <div className="border-t border-gray-100 pt-3">
+                          <p className="text-xs font-medium text-purple-700 mb-2 flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                            </svg>
+                            Practice History ({ids.length} session{ids.length > 1 ? 's' : ''})
+                          </p>
+                          <div className="flex flex-col gap-1">
+                            {shown.map((id, idx) => (
+                              <Link
+                                key={id}
+                                to={`/result/${id}`}
+                                className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs
+                                  bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
+                              >
+                                <span>Practice #{ids.length - idx}</span>
+                                <span className="flex items-center gap-1 text-purple-500">
+                                  View Results
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               )

@@ -112,7 +112,14 @@ function StudentResponseDisplay({ content, taskType }: { content: string; taskTy
     } catch { /* fall through */ }
   }
   if (type === 'writing') {
-    const stripped = content.replace(/<[^>]*>/g, '').trim()
+    const stripped = content
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
     if (!stripped) return <p className="text-sm text-gray-400 italic">No response submitted.</p>
     return <p className="text-sm text-gray-700 whitespace-pre-wrap">{stripped}</p>
   }
@@ -279,9 +286,6 @@ export default function ResultPage() {
                 ({result.overall_score.toFixed(1)} / {result.overall_score_max} pts)
               </span>
             </div>
-            {result.band_score != null && (
-              <p className="text-sm text-gray-600 mb-2">Band score: <strong>{result.band_score.toFixed(1)}</strong> / 9</p>
-            )}
             <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
               <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${scorePercent}%` }} />
             </div>

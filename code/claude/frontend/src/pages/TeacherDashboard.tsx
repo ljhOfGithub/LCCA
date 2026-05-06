@@ -329,7 +329,14 @@ function TaskContentDisplay({ content, taskType }: { content: string; taskType: 
   }
 
   if (type === 'writing') {
-    const stripped = content.replace(/<[^>]*>/g, '').trim()
+    const stripped = content
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
     if (!stripped) return <p className="text-sm text-gray-400 italic">No response submitted.</p>
     return <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{stripped}</p>
   }

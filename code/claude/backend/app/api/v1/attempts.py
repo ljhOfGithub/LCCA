@@ -78,13 +78,14 @@ async def create_attempt(
     if not student:
         raise HTTPException(status_code=403, detail="Student profile not found")
 
-    # Return existing active attempt if one exists (prevent duplicates)
+    # Return existing active attempt in the same mode (exam vs practice stay independent)
     existing_result = await session.execute(
         select(Attempt)
         .where(
             Attempt.student_id == student.id,
             Attempt.scenario_id == data.scenario_id,
             Attempt.status.in_([AttemptStatus.CREATED, AttemptStatus.IN_PROGRESS]),
+            Attempt.is_practice == data.is_practice,
         )
         .order_by(Attempt.created_at.desc())
         .limit(1)
@@ -96,27 +97,31 @@ async def create_attempt(
             student_id=existing.student_id,
             scenario_id=existing.scenario_id,
             status=existing.status.value,
+            is_practice=existing.is_practice,
             started_at=existing.started_at,
         )
 
-    # Check if already submitted/scored
-    submitted_result = await session.execute(
-        select(Attempt)
-        .where(
-            Attempt.student_id == student.id,
-            Attempt.scenario_id == data.scenario_id,
-            Attempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.SCORED]),
+    # For exam attempts, block retakes once submitted/scored
+    if not data.is_practice:
+        submitted_result = await session.execute(
+            select(Attempt)
+            .where(
+                Attempt.student_id == student.id,
+                Attempt.scenario_id == data.scenario_id,
+                Attempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.SCORED]),
+                Attempt.is_practice == False,
+            )
+            .limit(1)
         )
-        .limit(1)
-    )
-    if submitted_result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Exam already submitted")
+        if submitted_result.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Exam already submitted")
 
     # Create attempt
     attempt = Attempt(
         student_id=student.id,
         scenario_id=data.scenario_id,
         status=AttemptStatus.CREATED,
+        is_practice=data.is_practice,
     )
     session.add(attempt)
     await session.flush()
@@ -145,6 +150,7 @@ async def create_attempt(
         student_id=attempt.student_id,
         scenario_id=attempt.scenario_id,
         status=attempt.status.value,
+        is_practice=attempt.is_practice,
         started_at=attempt.started_at,
     )
 
@@ -211,6 +217,7 @@ async def list_attempts(
             student_id=a.student_id,
             scenario_id=a.scenario_id,
             status=a.status.value,
+            is_practice=a.is_practice,
         )
         for a in attempts
     ]
@@ -303,9 +310,9 @@ async def start_attempt(
     if attempt.student_id != student.id:
         raise HTTPException(status_code=403, detail="Not authorized for this attempt")
 
-    # Check for timeout on resume
+    # Check for timeout on resume (skipped for practice attempts)
     if attempt.status == AttemptStatus.IN_PROGRESS and attempt.started_at:
-        if is_attempt_expired(attempt.started_at):
+        if not attempt.is_practice and is_attempt_expired(attempt.started_at):
             attempt.status = AttemptStatus.SUBMITTED
             attempt.submitted_at = datetime.now(timezone.utc)
             await session.commit()
@@ -329,6 +336,7 @@ async def start_attempt(
         student_id=attempt.student_id,
         scenario_id=attempt.scenario_id,
         status=attempt.status.value,
+        is_practice=attempt.is_practice,
         started_at=attempt.started_at,
     )
 

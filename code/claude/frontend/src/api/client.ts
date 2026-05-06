@@ -81,8 +81,8 @@ export const scenarioApi = {
 
 export const attemptApi = {
   // 创建新的考试尝试
-  create: (scenarioId: string) =>
-    apiClient.post('/attempts', { scenario_id: scenarioId }),
+  create: (scenarioId: string, isPractice: boolean = false) =>
+    apiClient.post('/attempts', { scenario_id: scenarioId, is_practice: isPractice }),
 
   // 获取用户的尝试列表
   list: (params?: { user_id?: string; page?: number; per_page?: number; status?: string }) =>

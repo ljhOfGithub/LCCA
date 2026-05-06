@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ConfigDict
 class AttemptCreate(BaseModel):
     """Request body for creating a new attempt."""
     scenario_id: UUID = Field(..., description="UUID of the scenario/exam to take")
+    is_practice: bool = Field(default=False, description="Practice mode: unlimited retakes, no forced submission on timeout")
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -19,6 +20,7 @@ class AttemptResponse(BaseModel):
     student_id: UUID = Field(..., description="Student UUID")
     scenario_id: UUID = Field(..., description="Scenario UUID")
     status: str = Field(..., description="Current attempt status")
+    is_practice: bool = Field(default=False, description="Whether this is a practice attempt")
     started_at: Optional[datetime] = Field(default=None, description="When the attempt was started")
 
     model_config = ConfigDict(from_attributes=True)

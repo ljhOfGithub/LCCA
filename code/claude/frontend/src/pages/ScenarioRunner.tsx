@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import ProgressBar from '../components/ProgressBar'
 import Timer from '../components/Timer'
 import Task1Reading from './tasks/Task1Reading'
@@ -51,6 +51,8 @@ function getAudioUrl(task: Task): string {
 export default function ScenarioRunner() {
   const { scenarioId } = useParams<{ scenarioId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isPractice = searchParams.get('mode') === 'practice'
 
   const [scenarioTitle, setScenarioTitle] = useState<string>('')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -99,16 +101,17 @@ export default function ScenarioRunner() {
       const durationMinutes: number = scenarioResponse.data.duration_minutes || 90
       const scenarioTotalSeconds = durationMinutes * 60
 
-      // Create attempt (returns existing if in-progress, 409 if already submitted)
+      // Create attempt (returns existing if in-progress, 409 if already submitted in exam mode)
       let aid = ''
       let attemptStartedAt: string | null = null
       try {
-        const attemptResponse = await attemptApi.create(scenarioId!)
+        const attemptResponse = await attemptApi.create(scenarioId!, isPractice)
         aid = attemptResponse.data.id
         attemptStartedAt = attemptResponse.data.started_at ?? null
         setAttemptId(aid)
       } catch (err: any) {
         if (err?.response?.status === 409) {
+          // Exam mode: already submitted — redirect to home
           navigate('/', { state: { submitted: true } })
           return
         }
@@ -283,7 +286,10 @@ export default function ScenarioRunner() {
   }
 
   function handleTimeUp() {
-    handleSubmitAll()
+    if (!isPractice) {
+      handleSubmitAll()
+    }
+    // In practice mode the timer simply stops — no forced submission
   }
 
   const handleSubmitAll = async () => {
@@ -353,7 +359,15 @@ export default function ScenarioRunner() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
             </button>
-            <h1 className="text-lg font-semibold text-gray-900">{scenarioTitle}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold text-gray-900">{scenarioTitle}</h1>
+              {isPractice && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                  bg-purple-100 text-purple-700">
+                  Practice Mode
+                </span>
+              )}
+            </div>
           </div>
 
           <Timer
