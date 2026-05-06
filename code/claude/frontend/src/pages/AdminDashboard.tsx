@@ -530,12 +530,13 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
   const isAudio = type === 'audio'
   const isDocument = FILE_MATERIAL_TYPES.includes(type)
 
+  const isFileType = isAudio || isDocument
+
   const handleSave = async () => {
     setSaving(true); setError('')
     try {
-      if (initial) {
-        await apiClient.put(`/teacher/materials/${initial.id}`, { material_type: type, content: content || null })
-      } else if (isAudio && uploadFile) {
+      if (isAudio && uploadFile) {
+        // Upload new audio (endpoint replaces any existing audio material for this task)
         const form = new FormData()
         form.append('file', uploadFile)
         await apiClient.post(`/teacher/tasks/${taskId}/materials/upload-audio`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
@@ -547,6 +548,12 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
           form,
           { headers: { 'Content-Type': 'multipart/form-data' } }
         )
+      } else if (initial && isFileType && !uploadFile) {
+        // Editing a file material but no new file chosen — nothing to update
+        onSave(); return
+      } else if (initial) {
+        // Editing a text material
+        await apiClient.put(`/teacher/materials/${initial.id}`, { material_type: type, content: content || null })
       } else {
         if (!content.trim()) { setError('Content is required'); setSaving(false); return }
         await apiClient.post(`/teacher/tasks/${taskId}/materials`, { material_type: type, content })
@@ -569,15 +576,24 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
           </select>
         </div>
       )}
-      {(isAudio || isDocument) && !initial ? (
+      {isFileType ? (
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-600 mb-1">
             {isAudio ? 'Audio File (MP3/WAV)' : 'Document File (PDF/DOCX)'}
           </label>
+          {initial?.storage_key && (
+            <p className="text-xs text-gray-400 mb-2">
+              Current: {initial.storage_key.split('/').pop()}
+            </p>
+          )}
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => fileRef.current?.click()}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-100">Choose File</button>
-            <span className="text-sm text-gray-500">{uploadFile ? uploadFile.name : 'No file selected'}</span>
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-100">
+              {initial ? 'Replace File' : 'Choose File'}
+            </button>
+            <span className="text-sm text-gray-500">
+              {uploadFile ? uploadFile.name : initial ? 'No new file selected (keep current)' : 'No file selected'}
+            </span>
           </div>
           <input
             ref={fileRef}
@@ -597,7 +613,7 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
       <div className="flex gap-2">
         <button
           onClick={handleSave}
-          disabled={saving || (((isAudio || isDocument) && !initial) && !uploadFile && !content)}
+          disabled={saving}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
           {saving ? 'Saving…' : 'Save'}
         </button>
