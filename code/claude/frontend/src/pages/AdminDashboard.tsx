@@ -75,11 +75,10 @@ function Badge({ status }: { status: string }) {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-type Tab = 'scenarios' | 'rubrics' | 'prompts'
+type Tab = 'scenarios' | 'prompts'
 
 const TAB_LABELS: Record<Tab, string> = {
   scenarios: 'Scenarios & Tasks',
-  rubrics: 'Rubric Matrix',
   prompts: 'Prompt Templates',
 }
 
@@ -111,7 +110,6 @@ export default function AdminDashboard({ userName }: { userName: string }) {
       </header>
       <main className="flex-1 p-6">
         {tab === 'scenarios' && <ScenariosTab />}
-        {tab === 'rubrics' && <RubricMatrixTab />}
         {tab === 'prompts' && <PromptTemplatesTab />}
       </main>
     </div>
@@ -406,15 +404,58 @@ function TaskDetail({ scenario, task, onBack, onReload }: { scenario: Scenario; 
   const [editingTask, setEditingTask] = useState(false)
   const [addingMaterial, setAddingMaterial] = useState(false)
 
+  // Rubric state
+  const [rubric, setRubric] = useState<RubricOut | null>(null)
+  const [loadingRubric, setLoadingRubric] = useState(false)
+  const [editingCriterion, setEditingCriterion] = useState<CriterionOut | null>(null)
+  const [addingCriterion, setAddingCriterion] = useState(false)
+  const [creatingRubric, setCreatingRubric] = useState(false)
+
+  const loadRubric = async () => {
+    setLoadingRubric(true)
+    setRubric(null)
+    try {
+      const r = await apiClient.get(`/admin/rubrics?task_id=${task.id}`)
+      const list: RubricOut[] = r.data
+      setRubric(list.length > 0 ? list[0] : null)
+    } catch (e) { console.error(e) }
+    finally { setLoadingRubric(false) }
+  }
+
+  useEffect(() => { loadRubric() }, [task.id])
+
   const deleteMaterial = async (materialId: string) => {
     if (!confirm('Delete this material?')) return
     await apiClient.delete(`/teacher/materials/${materialId}`)
     onReload()
   }
 
+  const handleCreateRubric = async () => {
+    setCreatingRubric(true)
+    try {
+      const r = await apiClient.post('/admin/rubrics', { task_id: task.id, name: `${task.title} Rubric` })
+      setRubric(r.data)
+    } catch (e: any) { alert(e.response?.data?.detail || 'Failed') }
+    finally { setCreatingRubric(false) }
+  }
+
+  const handleDeleteRubric = async () => {
+    if (!rubric || !confirm('Delete this entire rubric and all criteria?')) return
+    await apiClient.delete(`/admin/rubrics/${rubric.id}`)
+    setRubric(null)
+  }
+
+  const handleDeleteCriterion = async (criterionId: string) => {
+    if (!confirm('Delete this criterion?')) return
+    await apiClient.delete(`/admin/criteria/${criterionId}`)
+    loadRubric()
+  }
+
   return (
     <div className="max-w-3xl mx-auto">
       <button onClick={onBack} className="text-sm text-blue-600 hover:underline mb-4">← {scenario.title}</button>
+
+      {/* Task info */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5">
         {editingTask
           ? <TaskForm scenarioId={scenario.id} initial={task} onSave={() => { setEditingTask(false); onReload() }} onCancel={() => setEditingTask(false)} />
@@ -432,6 +473,8 @@ function TaskDetail({ scenario, task, onBack, onReload }: { scenario: Scenario; 
             </div>
           )}
       </div>
+
+      {/* Materials */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-gray-700">Materials ({task.materials.length})</h3>
         <button onClick={() => setAddingMaterial(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ Add Material</button>
@@ -440,6 +483,73 @@ function TaskDetail({ scenario, task, onBack, onReload }: { scenario: Scenario; 
       {task.materials.length === 0
         ? <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">No materials yet.</div>
         : <div className="space-y-3">{task.materials.map(m => <MaterialCard key={m.id} material={m} taskId={task.id} onDelete={() => deleteMaterial(m.id)} onReload={onReload} />)}</div>}
+
+      {/* Rubric & Criteria */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-700">Rubric & Criteria</h3>
+          {rubric
+            ? <div className="flex gap-2">
+                <button onClick={() => setAddingCriterion(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ Add Criterion</button>
+                <button onClick={handleDeleteRubric} className="px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50">Delete Rubric</button>
+              </div>
+            : !loadingRubric && (
+                <button onClick={handleCreateRubric} disabled={creatingRubric}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                  {creatingRubric ? 'Creating…' : 'Create Rubric'}
+                </button>
+              )}
+        </div>
+
+        {loadingRubric && <div className="text-center py-8 text-gray-400">Loading rubric…</div>}
+
+        {!loadingRubric && !rubric && (
+          <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
+            No rubric for this task yet.
+          </div>
+        )}
+
+        {!loadingRubric && rubric && (
+          <div className="space-y-4">
+            {addingCriterion && (
+              <CriterionForm
+                onSave={async (data) => {
+                  await apiClient.post(`/admin/rubrics/${rubric.id}/criteria`, data)
+                  setAddingCriterion(false)
+                  loadRubric()
+                }}
+                onCancel={() => setAddingCriterion(false)}
+              />
+            )}
+
+            {rubric.criteria.length === 0 && !addingCriterion && (
+              <div className="text-center py-8 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
+                No criteria yet. Click "+ Add Criterion" to add one.
+              </div>
+            )}
+
+            {rubric.criteria.map(c => (
+              <div key={c.id}>
+                {editingCriterion?.id === c.id
+                  ? <CriterionForm
+                      initial={c}
+                      onSave={async (data) => {
+                        await apiClient.patch(`/admin/criteria/${c.id}`, data)
+                        setEditingCriterion(null)
+                        loadRubric()
+                      }}
+                      onCancel={() => setEditingCriterion(null)}
+                    />
+                  : <CriterionCard
+                      criterion={c}
+                      onEdit={() => setEditingCriterion(c)}
+                      onDelete={() => handleDeleteCriterion(c.id)}
+                    />}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -797,172 +907,6 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
   )
 }
 
-// ── Rubric Matrix tab ──────────────────────────────────────────────────────────
-
-function RubricMatrixTab() {
-  const [scenarios, setScenarios] = useState<Scenario[]>([])
-  const [selectedScenario, setSelectedScenario] = useState<Scenario | null>(null)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const [rubric, setRubric] = useState<RubricOut | null>(null)
-  const [loadingRubric, setLoadingRubric] = useState(false)
-  const [editingCriterion, setEditingCriterion] = useState<CriterionOut | null>(null)
-  const [addingCriterion, setAddingCriterion] = useState(false)
-  const [creatingRubric, setCreatingRubric] = useState(false)
-
-  useEffect(() => {
-    apiClient.get('/teacher/scenarios').then(r => setScenarios(r.data)).catch(console.error)
-  }, [])
-
-  const loadRubric = async (taskId: string) => {
-    setLoadingRubric(true)
-    setRubric(null)
-    try {
-      const r = await apiClient.get(`/admin/rubrics?task_id=${taskId}`)
-      const list: RubricOut[] = r.data
-      setRubric(list.length > 0 ? list[0] : null)
-    } catch (e) { console.error(e) }
-    finally { setLoadingRubric(false) }
-  }
-
-  const selectTask = (task: Task) => {
-    setSelectedTask(task)
-    setAddingCriterion(false)
-    setEditingCriterion(null)
-    loadRubric(task.id)
-  }
-
-  const handleCreateRubric = async () => {
-    if (!selectedTask) return
-    setCreatingRubric(true)
-    try {
-      const r = await apiClient.post('/admin/rubrics', { task_id: selectedTask.id, name: `${selectedTask.title} Rubric` })
-      setRubric(r.data)
-    } catch (e: any) { alert(e.response?.data?.detail || 'Failed') }
-    finally { setCreatingRubric(false) }
-  }
-
-  const handleDeleteRubric = async () => {
-    if (!rubric || !confirm('Delete this entire rubric and all criteria?')) return
-    await apiClient.delete(`/admin/rubrics/${rubric.id}`)
-    setRubric(null)
-  }
-
-  const handleDeleteCriterion = async (criterionId: string) => {
-    if (!confirm('Delete this criterion?')) return
-    await apiClient.delete(`/admin/criteria/${criterionId}`)
-    if (selectedTask) loadRubric(selectedTask.id)
-  }
-
-  return (
-    <div className="max-w-6xl mx-auto">
-      <h2 className="text-lg font-semibold text-gray-800 mb-4">Rubric Matrix Management</h2>
-
-      <div className="grid grid-cols-3 gap-6">
-        {/* Left: scenario/task picker */}
-        <div className="col-span-1 space-y-2">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scenarios & Tasks</p>
-          {scenarios.map(sc => (
-            <div key={sc.id}>
-              <button
-                onClick={() => { setSelectedScenario(sc === selectedScenario ? null : sc); setSelectedTask(null); setRubric(null) }}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors
-                  ${selectedScenario?.id === sc.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}>
-                {sc.title}
-              </button>
-              {selectedScenario?.id === sc.id && sc.tasks.length > 0 && (
-                <div className="ml-3 mt-1 space-y-1">
-                  {[...sc.tasks].sort((a, b) => a.sequence_order - b.sequence_order).map(t => (
-                    <button key={t.id} onClick={() => selectTask(t)}
-                      className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors
-                        ${selectedTask?.id === t.id ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
-                      #{t.sequence_order + 1} {t.title}
-                      <span className="ml-1 text-gray-400">({t.task_type})</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Right: rubric matrix */}
-        <div className="col-span-2">
-          {!selectedTask && (
-            <div className="text-center py-16 text-gray-400">Select a task on the left to manage its rubric.</div>
-          )}
-
-          {selectedTask && (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-semibold text-gray-800">{selectedTask.title}</h3>
-                  <p className="text-xs text-gray-500">{selectedTask.task_type}</p>
-                </div>
-                {rubric
-                  ? <div className="flex gap-2">
-                      <button onClick={() => setAddingCriterion(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ Add Criterion</button>
-                      <button onClick={handleDeleteRubric} className="px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50">Delete Rubric</button>
-                    </div>
-                  : <button onClick={handleCreateRubric} disabled={creatingRubric} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">{creatingRubric ? 'Creating…' : 'Create Rubric'}</button>}
-              </div>
-
-              {loadingRubric && <div className="text-center py-8 text-gray-400">Loading…</div>}
-
-              {!loadingRubric && !rubric && (
-                <div className="text-center py-12 bg-white border border-dashed border-gray-300 rounded-xl text-gray-400">
-                  No rubric for this task. Click "Create Rubric" to add one.
-                </div>
-              )}
-
-              {!loadingRubric && rubric && (
-                <div className="space-y-4">
-                  {/* Add criterion form */}
-                  {addingCriterion && (
-                    <CriterionForm
-                      onSave={async (data) => {
-                        await apiClient.post(`/admin/rubrics/${rubric.id}/criteria`, data)
-                        setAddingCriterion(false)
-                        loadRubric(selectedTask.id)
-                      }}
-                      onCancel={() => setAddingCriterion(false)}
-                    />
-                  )}
-
-                  {/* Criteria matrix */}
-                  {rubric.criteria.length === 0 && !addingCriterion && (
-                    <div className="text-center py-8 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
-                      No criteria yet. Add your first criterion above.
-                    </div>
-                  )}
-
-                  {rubric.criteria.map(c => (
-                    <div key={c.id}>
-                      {editingCriterion?.id === c.id
-                        ? <CriterionForm
-                            initial={c}
-                            onSave={async (data) => {
-                              await apiClient.patch(`/admin/criteria/${c.id}`, data)
-                              setEditingCriterion(null)
-                              loadRubric(selectedTask.id)
-                            }}
-                            onCancel={() => setEditingCriterion(null)}
-                          />
-                        : <CriterionCard
-                            criterion={c}
-                            onEdit={() => setEditingCriterion(c)}
-                            onDelete={() => handleDeleteCriterion(c.id)}
-                          />}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function CriterionCard({ criterion: c, onEdit, onDelete }: { criterion: CriterionOut; onEdit: () => void; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
