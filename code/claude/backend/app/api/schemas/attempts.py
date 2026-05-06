@@ -19,6 +19,7 @@ class AttemptResponse(BaseModel):
     student_id: UUID = Field(..., description="Student UUID")
     scenario_id: UUID = Field(..., description="Scenario UUID")
     status: str = Field(..., description="Current attempt status")
+    started_at: Optional[datetime] = Field(default=None, description="When the attempt was started")
 
     model_config = ConfigDict(from_attributes=True)
 

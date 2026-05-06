@@ -34,6 +34,8 @@ export default function ScenarioList() {
   const [userName, setUserName] = useState('')
   // Maps scenario_id → attempt_id for submitted/scored attempts
   const [submittedAttempts, setSubmittedAttempts] = useState<Map<string, string>>(new Map())
+  // Maps scenario_id → attempt_id for in-progress/created attempts
+  const [inProgressAttempts, setInProgressAttempts] = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) { navigate('/login'); return }
@@ -61,6 +63,22 @@ export default function ScenarioList() {
 
     attemptApi.list({ status: 'scored' }).then(r => {
       mergeAttempts(r.data.items || [])
+    }).catch(() => {})
+
+    const mergeInProgress = (items: { id: string; scenario_id: string }[]) => {
+      setInProgressAttempts(prev => {
+        const next = new Map(prev)
+        items.forEach(a => next.set(a.scenario_id, a.id))
+        return next
+      })
+    }
+
+    attemptApi.list({ status: 'in_progress' }).then(r => {
+      mergeInProgress(r.data.items || [])
+    }).catch(() => {})
+
+    attemptApi.list({ status: 'created' }).then(r => {
+      mergeInProgress(r.data.items || [])
     }).catch(() => {})
   }, [])
 
@@ -257,6 +275,28 @@ export default function ScenarioList() {
                               d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                           </svg>
                           View Results
+                        </Link>
+                      </div>
+                    ) : inProgressAttempts.has(scenario.id) ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="w-full flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg text-sm
+                          bg-amber-50 text-amber-700 border border-amber-200">
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          In Progress
+                        </div>
+                        <Link
+                          to={`/exam/${scenario.id}`}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+                            bg-amber-500 text-white hover:bg-amber-600 transition-colors text-sm"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.649z" />
+                          </svg>
+                          Continue Assessment
                         </Link>
                       </div>
                     ) : (

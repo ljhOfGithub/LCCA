@@ -67,22 +67,17 @@ export default function ScenarioRunner() {
 
   const currentTask = tasks[currentTaskIndex]
   const allTasksCompleted = tasks.length > 0 && tasks.every((_, i) => taskStatuses[i] === 'completed')
-  // Default to 90 minutes if not specified
-  const totalSeconds = 90 * 60
 
   const {
     seconds,
     formatted,
     isRunning,
     isWarning,
-    start,
     pause,
+    startFrom,
   } = useCountdown({
-    initialSeconds: totalSeconds,
+    initialSeconds: 90 * 60,
     onComplete: handleTimeUp,
-    onWarning: (remaining) => {
-      console.log('Warning: Time is running out!', remaining)
-    },
     warningThreshold: 300,
   })
 
@@ -101,11 +96,16 @@ export default function ScenarioRunner() {
       const rawTasks: Task[] = scenarioResponse.data.tasks || []
       setTasks(rawTasks)
 
+      const durationMinutes: number = scenarioResponse.data.duration_minutes || 90
+      const scenarioTotalSeconds = durationMinutes * 60
+
       // Create attempt (returns existing if in-progress, 409 if already submitted)
       let aid = ''
+      let attemptStartedAt: string | null = null
       try {
         const attemptResponse = await attemptApi.create(scenarioId!)
         aid = attemptResponse.data.id
+        attemptStartedAt = attemptResponse.data.started_at ?? null
         setAttemptId(aid)
       } catch (err: any) {
         if (err?.response?.status === 409) {
@@ -123,12 +123,20 @@ export default function ScenarioRunner() {
       })
       setTaskStatuses(initialStatuses)
 
-      // Start attempt — if already submitted, the status comes back as 'submitted'
+      // Start attempt — response always contains started_at (set on first start, preserved on resume)
       const startRes = await attemptApi.start(aid)
       if (startRes.data.status !== 'in_progress') {
         alert('You have already submitted this exam.')
         navigate('/')
         return
+      }
+
+      // Compute remaining time from started_at so resume shows the correct value
+      const startedAtStr: string | null = startRes.data.started_at ?? attemptStartedAt ?? null
+      let remainingSeconds = scenarioTotalSeconds
+      if (startedAtStr) {
+        const elapsed = (Date.now() - new Date(startedAtStr).getTime()) / 1000
+        remainingSeconds = Math.max(1, Math.floor(scenarioTotalSeconds - elapsed))
       }
 
       // Load task response IDs from backend (returns statuses as loaded from server)
@@ -145,7 +153,7 @@ export default function ScenarioRunner() {
       const firstActive = rawTasks.findIndex((_, i) => (loadedStatuses[i] ?? 'not_started') !== 'completed')
       setCurrentTaskIndex(firstActive >= 0 ? firstActive : 0)
 
-      start()
+      startFrom(remainingSeconds)
     } catch (error) {
       console.error('Failed to load scenario:', error)
     } finally {
@@ -354,7 +362,7 @@ export default function ScenarioRunner() {
             isWarning={isWarning}
             isRunning={isRunning}
             onPause={pause}
-            onResume={start}
+            onResume={() => startFrom(seconds)}
           />
         </div>
       </header>
@@ -403,9 +411,11 @@ export default function ScenarioRunner() {
         <div className="flex-1 bg-white rounded-lg border border-gray-200 p-6 overflow-hidden">
           {currentTask?.task_type === 'reading' && (
             <Task1Reading
+              taskTitle={currentTask.title}
+              taskDescription={currentTask.description}
               advertisement={{
                 title: currentTask.title,
-                body: getMaterial(currentTask, 'advertisement')?.content || getMaterial(currentTask, 'job_description')?.content || currentTask.description || '',
+                body: getMaterial(currentTask, 'advertisement')?.content || getMaterial(currentTask, 'job_description')?.content || '',
               }}
               attemptId={attemptId!}
               taskId={currentTask.id}
@@ -427,9 +437,11 @@ export default function ScenarioRunner() {
 
           {currentTask?.task_type === 'writing' && (
             <Task2Writing
+              taskTitle={currentTask.title}
+              taskDescription={currentTask.description}
               referenceMaterials={{
                 resume: getMaterial(currentTask, 'resume')?.content || undefined,
-                job_description: getMaterial(currentTask, 'job_description')?.content || currentTask.description || '',
+                job_description: getMaterial(currentTask, 'job_description')?.content || undefined,
                 notes: getMaterial(currentTask, 'notes')?.content || undefined,
               }}
               wordLimit={{ min: 150, max: 300 }}
@@ -459,6 +471,8 @@ export default function ScenarioRunner() {
             }
             return (
               <Task3Listening
+                taskTitle={currentTask.title}
+                taskDescription={currentTask.description}
                 attemptId={attemptId!}
                 taskId={currentTask.id}
                 audioUrl={getAudioUrl(currentTask)}
@@ -490,12 +504,14 @@ export default function ScenarioRunner() {
 
           {currentTask?.task_type === 'speaking' && (
             <Task4Speaking
+              taskTitle={currentTask.title}
+              taskDescription={currentTask.description}
               attemptId={attemptId!}
               taskId={currentTask.id}
               questions={[{
                 id: 'q-1',
                 order: 1,
-                question: currentTask.description || 'Please answer the interview questions.',
+                question: getMaterial(currentTask, 'notes')?.content || 'Please answer the interview questions.',
                 timeLimitSeconds: currentTask.time_limit_seconds || 180,
               }] as SpeakingQuestion[]}
               initialContent={taskContents[currentTaskIndex] || ''}

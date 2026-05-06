@@ -16,6 +16,13 @@ export function useCountdown({
   const [seconds, setSeconds] = useState(initialSeconds)
   const [isRunning, setIsRunning] = useState(false)
   const warningFiredRef = useRef(false)
+  // Stable refs so callbacks never appear in effect deps
+  const onCompleteRef = useRef(onComplete)
+  const onWarningRef = useRef(onWarning)
+  const warningThresholdRef = useRef(warningThreshold)
+  useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
+  useEffect(() => { onWarningRef.current = onWarning }, [onWarning])
+  useEffect(() => { warningThresholdRef.current = warningThreshold }, [warningThreshold])
 
   const start = useCallback(() => {
     setIsRunning(true)
@@ -31,6 +38,14 @@ export function useCountdown({
     warningFiredRef.current = false
   }, [initialSeconds])
 
+  // Atomically set seconds and start — avoids the isRunning false→true flicker
+  const startFrom = useCallback((newSeconds: number) => {
+    setSeconds(newSeconds)
+    setIsRunning(true)
+    warningFiredRef.current = false
+  }, [])
+
+  // Only re-runs when isRunning toggles, not on every render
   useEffect(() => {
     if (!isRunning) return
 
@@ -38,14 +53,13 @@ export function useCountdown({
       setSeconds((prev) => {
         if (prev <= 1) {
           setIsRunning(false)
-          onComplete?.()
+          onCompleteRef.current?.()
           return 0
         }
 
-        // Fire warning once when threshold reached
-        if (!warningFiredRef.current && prev <= warningThreshold) {
+        if (!warningFiredRef.current && prev <= warningThresholdRef.current) {
           warningFiredRef.current = true
-          onWarning?.(prev)
+          onWarningRef.current?.(prev)
         }
 
         return prev - 1
@@ -53,9 +67,8 @@ export function useCountdown({
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [isRunning, onComplete, onWarning, warningThreshold])
+  }, [isRunning])
 
-  // Format time as MM:SS
   const formatted = `${Math.floor(seconds / 60)
     .toString()
     .padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
@@ -70,5 +83,6 @@ export function useCountdown({
     start,
     pause,
     reset,
+    startFrom,
   }
 }

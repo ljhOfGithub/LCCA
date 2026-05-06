@@ -13,6 +13,8 @@ interface Task2WritingProps {
     min: number
     max: number
   }
+  taskTitle?: string
+  taskDescription?: string | null
   attemptId: string
   taskId: string
   taskIndex: number
@@ -29,6 +31,8 @@ interface Task2WritingProps {
 export default function Task2Writing({
   referenceMaterials,
   wordLimit = { min: 150, max: 300 },
+  taskTitle,
+  taskDescription,
   taskIndex,
   initialContent = '',
   timeLimit,
@@ -156,10 +160,10 @@ export default function Task2Writing({
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-gray-200">
         <div>
-          <h2 className="text-xl font-semibold text-gray-800">Task 2: Cover Letter Writing</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Write a cover letter based on the reference materials
-          </p>
+          <h2 className="text-xl font-semibold text-gray-800">{taskTitle || 'Task 2: Cover Letter Writing'}</h2>
+          {taskDescription && (
+            <p className="text-sm text-gray-600 mt-1 max-w-2xl">{taskDescription}</p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {timeRemaining !== null && (

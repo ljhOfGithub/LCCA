@@ -3,6 +3,8 @@ import AudioPlayer from '../../components/AudioPlayer'
 import NotesEditor from '../../components/NotesEditor'
 
 interface Task3ListeningProps {
+  taskTitle?: string
+  taskDescription?: string | null
   attemptId: string
   taskId: string
   audioUrl: string
@@ -18,6 +20,8 @@ interface Task3ListeningProps {
 }
 
 export default function Task3Listening({
+  taskTitle,
+  taskDescription,
   attemptId,
   taskId,
   audioUrl,
@@ -140,10 +144,10 @@ export default function Task3Listening({
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-gray-200">
         <div>
-          <h2 className="text-xl font-semibold text-gray-800">Task 3: Listening & Note-taking</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Listen to the audio and take notes. You have one replay opportunity.
-          </p>
+          <h2 className="text-xl font-semibold text-gray-800">{taskTitle || 'Task 3: Listening & Note-taking'}</h2>
+          {taskDescription && (
+            <p className="text-sm text-gray-600 mt-1 max-w-2xl">{taskDescription}</p>
+          )}
         </div>
 
         {/* Timer */}

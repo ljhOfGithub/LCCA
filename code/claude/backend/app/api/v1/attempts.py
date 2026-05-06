@@ -96,6 +96,7 @@ async def create_attempt(
             student_id=existing.student_id,
             scenario_id=existing.scenario_id,
             status=existing.status.value,
+            started_at=existing.started_at,
         )
 
     # Check if already submitted/scored
@@ -144,6 +145,7 @@ async def create_attempt(
         student_id=attempt.student_id,
         scenario_id=attempt.scenario_id,
         status=attempt.status.value,
+        started_at=attempt.started_at,
     )
 
 
@@ -327,6 +329,7 @@ async def start_attempt(
         student_id=attempt.student_id,
         scenario_id=attempt.scenario_id,
         status=attempt.status.value,
+        started_at=attempt.started_at,
     )
 
 

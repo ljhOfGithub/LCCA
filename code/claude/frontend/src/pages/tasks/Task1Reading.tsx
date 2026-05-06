@@ -5,6 +5,8 @@ interface Task1ReadingProps {
     title: string
     body: string
   }
+  taskTitle?: string
+  taskDescription?: string | null
   attemptId: string
   taskId: string
   taskIndex: number
@@ -20,6 +22,8 @@ interface Task1ReadingProps {
 
 export default function Task1Reading({
   advertisement,
+  taskTitle,
+  taskDescription,
   taskIndex,
   initialContent = '',
   timeLimit,
@@ -139,10 +143,10 @@ export default function Task1Reading({
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-gray-200">
         <div>
-          <h2 className="text-xl font-semibold text-gray-800">Task 1: Reading & Note-taking</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Read the advertisement and take notes in the right panel
-          </p>
+          <h2 className="text-xl font-semibold text-gray-800">{taskTitle || 'Task 1: Reading & Note-taking'}</h2>
+          {taskDescription && (
+            <p className="text-sm text-gray-600 mt-1 max-w-2xl">{taskDescription}</p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {timeRemaining !== null && (
@@ -183,9 +187,8 @@ export default function Task1Reading({
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold text-gray-700">Advertisement</h3>
-            <span className="text-xs text-gray-400">For reading only - cannot copy</span>
           </div>
-          <div className="flex-1 bg-white border border-gray-200 rounded-lg p-6 overflow-y-auto select-none">
+          <div className="flex-1 bg-white border border-gray-200 rounded-lg p-6 overflow-y-auto">
             <h4 className="text-lg font-bold text-blue-700 mb-4">{advertisement.title}</h4>
             <div className="prose prose-gray max-w-none whitespace-pre-wrap text-gray-700 leading-relaxed">
               {advertisement.body}

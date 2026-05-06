@@ -98,6 +98,8 @@ interface SpeakingQuestion {
 }
 
 interface Task4SpeakingProps {
+  taskTitle?: string
+  taskDescription?: string | null
   attemptId: string
   taskId: string
   questions: SpeakingQuestion[]
@@ -109,6 +111,8 @@ interface Task4SpeakingProps {
 }
 
 export default function Task4Speaking({
+  taskTitle,
+  taskDescription,
   attemptId,
   taskId,
   questions,
@@ -156,7 +160,6 @@ export default function Task4Speaking({
   const currentQuestion = questions[currentQuestionIndex]
   const isQuestionAnswered = currentQuestion && recordings[currentQuestion.id] !== undefined
   const isLastQuestion = currentQuestionIndex === questions.length - 1
-  const isAllAnswered = questions.every((q) => recordings[q.id] !== undefined)
 
   const handleStartRecording = useCallback(async () => {
     resetRecording()
@@ -231,22 +234,6 @@ export default function Task4Speaking({
     }
   }
 
-
-  const handleSubmitAll = async () => {
-    if (isAllAnswered && !isSubmitting) {
-      setIsSubmitting(true)
-      try {
-        const audioKeys = questions.map((q) => recordings[q.id])
-        await onSubmit(audioKeys)
-        onComplete()
-      } catch (err) {
-        console.error('Submit failed:', err)
-      } finally {
-        setIsSubmitting(false)
-      }
-    }
-  }
-
   // Reset recording when question changes
   useEffect(() => {
     resetRecording()
@@ -263,10 +250,10 @@ export default function Task4Speaking({
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-gray-200">
         <div>
-          <h2 className="text-xl font-semibold text-gray-800">Task 4: Speaking</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Answer the questions in sequence. You have 3 minutes for each question.
-          </p>
+          <h2 className="text-xl font-semibold text-gray-800">{taskTitle || 'Task 4: Speaking'}</h2>
+          {taskDescription && (
+            <p className="text-sm text-gray-600 mt-1 max-w-2xl">{taskDescription}</p>
+          )}
         </div>
 
         {/* Question Progress */}
@@ -290,12 +277,12 @@ export default function Task4Speaking({
       </div>
 
       {/* Question Content */}
-      <div className="flex-1 flex flex-col gap-6 py-6">
-        {/* Current Question */}
-        <div className="bg-primary-50 rounded-lg p-6 border border-primary-200">
-          <div className="flex items-center justify-between mb-3">
+      <div className="flex-1 flex flex-col gap-6 py-6 min-h-0">
+        {/* Current Question / Interview Materials */}
+        <div className="bg-primary-50 rounded-lg border border-primary-200 flex flex-col max-h-72 overflow-hidden">
+          <div className="flex items-center justify-between px-6 pt-4 pb-3 border-b border-primary-200 flex-shrink-0">
             <span className="text-sm font-medium text-primary-700">
-              Question {currentQuestionIndex + 1} of {questions.length}
+              Interview Materials
             </span>
             {currentQuestion && (
               <span className="text-sm text-primary-600">
@@ -303,9 +290,11 @@ export default function Task4Speaking({
               </span>
             )}
           </div>
-          <p className="text-lg text-gray-800 font-medium leading-relaxed">
-            {currentQuestion?.question}
-          </p>
+          <div className="overflow-y-auto px-6 py-4">
+            <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+              {currentQuestion?.question}
+            </p>
+          </div>
         </div>
 
         {/* Recording Section */}
