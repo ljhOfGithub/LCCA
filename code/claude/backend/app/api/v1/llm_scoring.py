@@ -410,6 +410,22 @@ async def score_attempt(
                 notes = json.loads(content).get("notes", content)
             except Exception:
                 pass
+
+            # Retrieve the audio transcript stored at upload time
+            audio_material = next(
+                (m for m in (task.materials or []) if m.material_type == "audio"), None
+            )
+            audio_transcript = ""
+            if audio_material:
+                if audio_material.metadata_json:
+                    try:
+                        audio_transcript = json.loads(audio_material.metadata_json).get("transcript", "")
+                    except Exception:
+                        pass
+                # Fallback: live-transcribe if no stored transcript (e.g. uploaded before this feature)
+                if not audio_transcript and audio_material.storage_key:
+                    audio_transcript = await _transcribe(audio_material.storage_key)
+
             default_prompt = TASK_PROMPTS["listening"].format(
                 response=notes or "(no notes submitted)",
                 criteria=criteria_text,
@@ -483,6 +499,7 @@ async def score_attempt(
                 "task_description": task.description or "",
                 "materials": all_materials,
                 **{f"material_{k}": v for k, v in materials_by_type.items()},
+                "material_audio_transcript": audio_transcript if task_type == "listening" else "",
                 "criteria": crit_lines,
                 "criteria_with_bands": criteria_with_bands,
                 "submission": submission_for_vars,

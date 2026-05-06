@@ -185,6 +185,34 @@ async def _get_material_for_admin(material_id: UUID, user: User, session: AsyncS
     return mat
 
 
+async def _transcribe_bytes(audio_bytes: bytes, ext: str, settings) -> str:
+    """Call the configured Whisper-compatible ASR API with raw bytes. Returns empty string on failure."""
+    if not getattr(settings, "asr_api_key", None):
+        return ""
+    import httpx, logging
+    mime = {
+        "mp3": "audio/mpeg", "wav": "audio/wav", "webm": "audio/webm",
+        "ogg": "audio/ogg", "m4a": "audio/mp4", "mp4": "audio/mp4",
+    }.get(ext, "audio/mpeg")
+    asr_url = getattr(settings, "asr_api_url", None) or "https://api.openai.com/v1/audio/transcriptions"
+    asr_model = getattr(settings, "asr_model", None) or "whisper-1"
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(
+                asr_url,
+                headers={"Authorization": f"Bearer {settings.asr_api_key}"},
+                files={"file": (f"audio.{ext}", audio_bytes, mime)},
+                data={"model": asr_model, "response_format": "json", "language": "en"},
+            )
+        if resp.status_code == 200:
+            body = resp.json()
+            return body.get("text") or body.get("transcript") or ""
+        logging.getLogger(__name__).warning("ASR upload-time transcription %s: %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logging.getLogger(__name__).warning("ASR upload-time transcription failed: %s", exc)
+    return ""
+
+
 @router.post("/tasks/{task_id}/materials/upload-audio", response_model=MaterialResponse, status_code=201)
 async def upload_audio_material(
     task_id: UUID,
@@ -227,7 +255,20 @@ async def upload_audio_material(
         await session.delete(old)
 
     pub = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
-    mat = Material(task_id=task.id, material_type="audio", content=f"{pub}/{settings.s3_bucket}/{storage_key}", storage_key=storage_key)
+    audio_url = f"{pub}/{settings.s3_bucket}/{storage_key}"
+
+    # Transcribe the audio at upload time so scoring has a text reference
+    transcript = await _transcribe_bytes(body, ext, settings)
+    import json as _json
+    metadata = _json.dumps({"transcript": transcript}) if transcript else None
+
+    mat = Material(
+        task_id=task.id,
+        material_type="audio",
+        content=audio_url,
+        storage_key=storage_key,
+        metadata_json=metadata,
+    )
     session.add(mat)
     await session.commit()
     return _mat_out(mat)
@@ -320,6 +361,57 @@ async def update_material(
         mat.storage_key = data.storage_key
     if data.metadata_json is not None:
         mat.metadata_json = data.metadata_json
+    await session.commit()
+    return _mat_out(mat)
+
+
+@router.post("/materials/{material_id}/transcribe", response_model=MaterialResponse)
+async def transcribe_audio_material(
+    material_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_admin()),
+):
+    """(Re-)transcribe an audio material using the configured ASR service and store the result."""
+    from app.core.config import settings
+    import boto3, asyncio, json as _json
+
+    mat = await _get_material_for_admin(material_id, current_user, session)
+    if mat.material_type != "audio":
+        raise HTTPException(400, "Only audio materials can be transcribed")
+    if not mat.storage_key:
+        raise HTTPException(400, "Material has no storage key — cannot download for transcription")
+
+    # Download from S3
+    def do_download():
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+        )
+        resp = s3.get_object(Bucket=settings.s3_bucket, Key=mat.storage_key)
+        return resp["Body"].read()
+
+    try:
+        loop = asyncio.get_event_loop()
+        audio_bytes = await loop.run_in_executor(None, do_download)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to download audio from storage: {e}")
+
+    ext = mat.storage_key.rsplit(".", 1)[-1] if "." in mat.storage_key else "mp3"
+    transcript = await _transcribe_bytes(audio_bytes, ext, settings)
+    if not transcript:
+        raise HTTPException(502, "ASR service returned no transcript — check ASR_API_KEY and ASR_API_URL settings")
+
+    existing_meta: dict = {}
+    if mat.metadata_json:
+        try:
+            existing_meta = _json.loads(mat.metadata_json)
+        except Exception:
+            pass
+    existing_meta["transcript"] = transcript
+    mat.metadata_json = _json.dumps(existing_meta)
     await session.commit()
     return _mat_out(mat)
 

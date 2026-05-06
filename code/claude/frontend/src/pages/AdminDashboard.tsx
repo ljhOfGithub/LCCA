@@ -446,6 +446,25 @@ function TaskDetail({ scenario, task, onBack, onReload }: { scenario: Scenario; 
 
 function MaterialCard({ material, taskId, onDelete, onReload }: { material: Material; taskId: string; onDelete: () => void; onReload: () => void }) {
   const [editing, setEditing] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const [transcribeError, setTranscribeError] = useState('')
+
+  const meta = (() => { try { return material.metadata_json ? JSON.parse(material.metadata_json) : {} } catch { return {} } })()
+  const storedTranscript: string = meta.transcript || ''
+
+  const handleTranscribe = async () => {
+    setTranscribing(true)
+    setTranscribeError('')
+    try {
+      await apiClient.post(`/teacher/materials/${material.id}/transcribe`)
+      onReload()
+    } catch (e: any) {
+      setTranscribeError(e?.response?.data?.detail || 'Transcription failed')
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
   if (editing) return <MaterialForm taskId={taskId} initial={material} onSave={() => { setEditing(false); onReload() }} onCancel={() => setEditing(false)} />
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4">
@@ -457,16 +476,42 @@ function MaterialCard({ material, taskId, onDelete, onReload }: { material: Mate
           </div>
           {material.content && (
             material.material_type === 'audio'
-              ? <audio src={material.content} controls className="w-full mt-2" />
+              ? (
+                <div>
+                  <audio src={material.content} controls className="w-full mt-2" />
+                  {storedTranscript ? (
+                    <details className="mt-3">
+                      <summary className="text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700">
+                        Transcript ({storedTranscript.split(/\s+/).length} words)
+                      </summary>
+                      <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-3 border border-gray-100">
+                        {storedTranscript}
+                      </p>
+                    </details>
+                  ) : (
+                    <p className="mt-2 text-xs text-amber-600 italic">No transcript yet — click Transcribe to generate one.</p>
+                  )}
+                  {transcribeError && <p className="mt-1 text-xs text-red-500">{transcribeError}</p>}
+                </div>
+              )
               : FILE_MATERIAL_TYPES.includes(material.material_type) && material.storage_key
                 ? <a href={material.content} target="_blank" rel="noopener noreferrer"
                     className="text-sm text-blue-600 hover:underline mt-1 inline-block">
-                    Download {material.metadata_json ? JSON.parse(material.metadata_json).filename || 'file' : 'file'}
+                    Download {meta.filename || 'file'}
                   </a>
                 : <p className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">{material.content}</p>
           )}
         </div>
         <div className="flex gap-2 flex-shrink-0">
+          {material.material_type === 'audio' && (
+            <button
+              onClick={handleTranscribe}
+              disabled={transcribing}
+              className="px-3 py-1 text-xs border border-purple-200 text-purple-700 rounded-lg hover:bg-purple-50 disabled:opacity-50"
+            >
+              {transcribing ? 'Transcribing…' : storedTranscript ? 'Re-transcribe' : 'Transcribe'}
+            </button>
+          )}
           <button onClick={() => setEditing(true)} className="px-3 py-1 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">Edit</button>
           <button onClick={onDelete} className="px-3 py-1 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50">Delete</button>
         </div>

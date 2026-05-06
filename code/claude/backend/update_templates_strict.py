@@ -205,7 +205,7 @@ Required output format:
 T3_SYSTEM = """\
 You are an expert CEFR language examiner for the LCCA assessment system.
 Your task: score a student's {task_type} notes for {task_title}.
-Context: Student listened to a seminar by a BrightWave representative and took notes for later interview use.
+Context: Student listened to an audio seminar and took notes for later use in a speaking task.
 Target proficiency level: B2.
 
 ## Scoring Band Scale
@@ -215,10 +215,11 @@ B1: Partial ability; lacks the range, control, relevance, or appropriateness nee
 A2: Limited, highly basic, or insufficient; dependent on simple language or incomplete understanding.
 
 ## Scoring Principles
-- Only NEW seminar content matters. Do not reward repetition of the job advertisement (already covered in Task 1).
-- Reward gist understanding even if exact wording differs from the seminar transcript.
-- Accept all note formats (bullets, phrases, shorthand) if usable for speaking.
-- Semantic matching against the seminar content map takes priority over surface wording.
+- The seminar transcript below is the SOLE reference source. Score only against content that appears in it.
+- Reward gist understanding even if exact wording differs from the transcript.
+- Do NOT penalise students for omitting content from the earlier reading task — only NEW seminar information counts.
+- Accept all note formats (bullets, phrases, abbreviations, shorthand) if the content is usable for speaking.
+- Semantic matching against the transcript takes priority over surface wording.
 - Use the exact criterion names from the rubric when reporting scores.
 
 ## CRITICAL RULE — Minimal or Non-Attempt Responses
@@ -231,10 +232,11 @@ T3_USER = """\
 ## Task Description
 {task_description}
 
-## Seminar Reference Content
-The following is the reference material students listened to. Use it to assess the accuracy and completeness of their notes.
+## Seminar Audio Transcript
+The following is a verbatim transcript of the audio the student listened to.
+Use it as the definitive reference when evaluating the accuracy and completeness of their notes.
 
-{materials}
+{material_audio_transcript}
 
 ## Criteria Overview
 {criteria}
@@ -259,7 +261,7 @@ Section B - Additional qualities:
 - resilience: start-up = uncertain environment, must adapt
 
 Rationale:
-Information Capture and Accuracy -> B2: Three vision elements captured accurately; three additional qualities not in the ad (curiosity, empathy, resilience). Score: 3/4.
+Information Capture and Accuracy -> B2: Three vision elements captured accurately from the transcript; three additional qualities not in the ad. Score: 3/4.
 Note Usefulness -> C1: Clear A/B separation; shorthand efficient; immediately usable for interview answers. Score: 4/4.
 
 ### BAD EXAMPLE — A2
@@ -267,7 +269,7 @@ Note Usefulness -> C1: Clear A/B separation; shorthand efficient; immediately us
 notes: brightwave is good company. they want good student. they talk about smart city and the future.
 
 Rationale:
-Information Capture and Accuracy -> A2: No specific vision elements; "smart city and the future" vague; no additional qualities beyond the ad. Score: 1/4.
+Information Capture and Accuracy -> A2: No specific transcript content captured; vague and generic. Score: 1/4.
 Note Usefulness -> A2: Three short phrases; no separation; completely unusable for a meaningful interview answer. Score: 1/4.
 
 ### MINIMAL RESPONSE EXAMPLE — A2 across ALL criteria
