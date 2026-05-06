@@ -907,26 +907,8 @@ async def get_audio_url(
     key: str,
     current_user=Depends(get_current_user),
 ):
-    """Return a 1-hour presigned URL for a MinIO audio key. Accessible to any authenticated user."""
-    import asyncio, os, boto3
-    from app.core.config import settings
-
-    def _gen() -> str:
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=settings.s3_endpoint,
-            aws_access_key_id=settings.s3_access_key,
-            aws_secret_access_key=settings.s3_secret_key,
-            region_name=settings.s3_region,
-        )
-        url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": settings.s3_bucket, "Key": key},
-            ExpiresIn=3600,
-        )
-        public = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
-        return url.replace(settings.s3_endpoint, public)
-
-    loop = asyncio.get_event_loop()
-    url = await loop.run_in_executor(None, _gen)
-    return {"url": url}
+    """Return a public URL for a MinIO audio key (bucket has anonymous download).
+    Routes through the frontend /minio proxy so a single tunnel covers everything."""
+    import os
+    public_base = os.environ.get("S3_PUBLIC_ENDPOINT", "/minio").rstrip("/")
+    return {"url": f"{public_base}/{settings.s3_bucket}/{key}"}

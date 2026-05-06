@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -43,6 +44,12 @@ export default function RichTextEditor({
       onChange(editor.getHTML())
     },
   })
+
+  // TipTap only reads `editable` at init; sync it whenever the prop changes
+  useEffect(() => {
+    if (!editor) return
+    editor.setEditable(!disabled)
+  }, [editor, disabled])
 
   if (!editor) {
     return null

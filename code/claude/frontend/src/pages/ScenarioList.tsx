@@ -71,11 +71,11 @@ export default function ScenarioList() {
       })
     }
 
-    attemptApi.list({ status: 'submitted' }).then(r => {
+    attemptApi.list({ status: 'submitted', per_page: 100 }).then(r => {
       mergeAttempts(r.data.items || [])
     }).catch(() => {})
 
-    attemptApi.list({ status: 'scored' }).then(r => {
+    attemptApi.list({ status: 'scored', per_page: 100 }).then(r => {
       mergeAttempts(r.data.items || [])
     }).catch(() => {})
 
@@ -372,7 +372,6 @@ export default function ScenarioList() {
                     {/* Practice History */}
                     {practiceHistory.has(scenario.id) && (() => {
                       const ids = practiceHistory.get(scenario.id)!
-                      const shown = ids.slice(0, 3)
                       return (
                         <div className="border-t border-gray-100 pt-3">
                           <p className="text-xs font-medium text-purple-700 mb-2 flex items-center gap-1">
@@ -383,7 +382,7 @@ export default function ScenarioList() {
                             Practice History ({ids.length} session{ids.length > 1 ? 's' : ''})
                           </p>
                           <div className="flex flex-col gap-1">
-                            {shown.map((id, idx) => (
+                            {ids.map((id, idx) => (
                               <Link
                                 key={id}
                                 to={`/result/${id}`}

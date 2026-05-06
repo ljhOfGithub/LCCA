@@ -34,7 +34,7 @@ interface SpeakingQuestion {
   timeLimitSeconds: number
 }
 
-const S3_BASE = 'http://localhost:9000/lcca-artifacts'
+const S3_BASE = '/minio/lcca-artifacts'
 
 function getMaterial(task: Task, type: string): Material | undefined {
   return task.materials?.find((m) => m.material_type === type)
