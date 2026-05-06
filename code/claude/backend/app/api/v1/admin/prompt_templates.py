@@ -107,6 +107,37 @@ async def list_scenarios_with_tasks(
     ]
 
 
+# ── Built-in fallback prompts ──────────────────────────────────────────────────
+
+class DefaultPromptTemplate(BaseModel):
+    task_type: str
+    label: str
+    system_prompt: str
+    user_prompt: str
+
+
+@router.get("/prompt-templates/defaults", response_model=list[DefaultPromptTemplate])
+async def get_default_prompt_templates(_: Annotated = Depends(require_admin())):
+    """Return the built-in hardcoded fallback prompts used when no custom template is assigned to a task."""
+    from app.api.v1.llm_scoring import SYSTEM_PROMPT, TASK_PROMPTS
+    labels = {
+        "reading":  "Task 1 — Reading & Note-taking",
+        "writing":  "Task 2 — Cover Letter Writing",
+        "listening":"Task 3 — Listening & Note-taking",
+        "speaking": "Task 4 — Speaking Interview",
+    }
+    return [
+        DefaultPromptTemplate(
+            task_type=task_type,
+            label=labels.get(task_type, task_type),
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=prompt,
+        )
+        for task_type, prompt in TASK_PROMPTS.items()
+        if task_type in labels
+    ]
+
+
 # ── CRUD ───────────────────────────────────────────────────────────────────────
 
 @router.get("/prompt-templates", response_model=list[PromptTemplateResponse])

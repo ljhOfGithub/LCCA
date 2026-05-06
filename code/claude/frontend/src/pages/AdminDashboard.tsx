@@ -1146,6 +1146,13 @@ interface PromptTemplate {
   task_ids: string[]
 }
 
+interface DefaultPromptTemplate {
+  task_type: string
+  label: string
+  system_prompt: string
+  user_prompt: string
+}
+
 interface TaskSummary {
   id: string
   title: string
@@ -1159,16 +1166,49 @@ interface ScenarioWithTasks {
   tasks: TaskSummary[]
 }
 
+// ── Shared: full-content expandable code block ─────────────────────────────────
+
+function PromptBlock({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
+      >
+        <span className="text-xs font-medium text-gray-600">{label}</span>
+        <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <pre className="p-3 text-xs font-mono text-gray-800 bg-white overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+          {text}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+// ── PromptTemplatesTab ─────────────────────────────────────────────────────────
+
 function PromptTemplatesTab() {
   const [templates, setTemplates] = useState<PromptTemplate[]>([])
+  const [defaults, setDefaults] = useState<DefaultPromptTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<PromptTemplate | null>(null)
   const [creating, setCreating] = useState(false)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [showDefaults, setShowDefaults] = useState(false)
 
   const reload = () => {
     setLoading(true)
-    apiClient.get('/admin/prompt-templates')
-      .then(r => setTemplates(r.data))
+    Promise.all([
+      apiClient.get('/admin/prompt-templates'),
+      apiClient.get('/admin/prompt-templates/defaults'),
+    ])
+      .then(([r1, r2]) => { setTemplates(r1.data); setDefaults(r2.data) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }
@@ -1181,45 +1221,132 @@ function PromptTemplatesTab() {
     reload()
   }
 
+  const toggleExpand = (id: string) =>
+    setExpandedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+
   if (creating) return <PromptTemplateForm onSave={() => { setCreating(false); reload() }} onCancel={() => setCreating(false)} />
   if (selected) return <PromptTemplateForm initial={selected} onSave={() => { setSelected(null); reload() }} onCancel={() => setSelected(null)} />
 
+  const TASK_TYPE_COLORS: Record<string, string> = {
+    reading: 'bg-blue-50 text-blue-700',
+    writing: 'bg-green-50 text-green-700',
+    listening: 'bg-orange-50 text-orange-700',
+    speaking: 'bg-pink-50 text-pink-700',
+  }
+
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-800">Prompt Templates</h2>
-        <button onClick={() => setCreating(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ New Template</button>
+    <div className="max-w-4xl mx-auto space-y-6">
+
+      {/* ── Custom templates ── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-800">Custom Prompt Templates</h2>
+          <button onClick={() => setCreating(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            + New Template
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="space-y-3">{[1,2,3,4].map(i => <div key={i} className="h-16 bg-gray-200 rounded-lg animate-pulse" />)}</div>
+        ) : templates.length === 0 ? (
+          <div className="text-center py-10 text-gray-400 border border-dashed border-gray-200 rounded-xl">
+            No custom prompt templates yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {templates.map(t => {
+              const expanded = expandedIds.has(t.id)
+              return (
+                <div key={t.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  {/* Card header row */}
+                  <div className="p-4 flex items-start justify-between">
+                    <div className="flex-1 min-w-0 mr-4">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="font-medium text-gray-900 text-sm font-mono">{t.name}</span>
+                        <span className="text-xs px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded">{t.template_type}</span>
+                        {t.task_ids.length > 0
+                          ? <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{t.task_ids.length} task{t.task_ids.length > 1 ? 's' : ''}</span>
+                          : <span className="text-xs px-1.5 py-0.5 bg-yellow-50 text-yellow-700 rounded">no task assigned</span>
+                        }
+                        {!t.is_active && <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded">Inactive</span>}
+                      </div>
+                      <p className="text-xs text-gray-400 line-clamp-1">{t.system_prompt.slice(0, 140)}{t.system_prompt.length > 140 ? '…' : ''}</p>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => toggleExpand(t.id)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1"
+                        title={expanded ? 'Collapse' : 'View full content'}
+                      >
+                        <svg className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                        {expanded ? 'Collapse' : 'View'}
+                      </button>
+                      <button onClick={() => setSelected(t)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Edit</button>
+                      <button onClick={() => deleteTemplate(t.id)} className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50">Delete</button>
+                    </div>
+                  </div>
+
+                  {/* Expanded content */}
+                  {expanded && (
+                    <div className="border-t border-gray-100 p-4 space-y-3 bg-gray-50">
+                      <PromptBlock label="System Prompt" text={t.system_prompt} />
+                      <PromptBlock label="User Prompt Template" text={t.user_prompt_template} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      {loading ? (
-        <div className="space-y-3">{[1,2,3,4].map(i => <div key={i} className="h-16 bg-gray-200 rounded-lg animate-pulse" />)}</div>
-      ) : templates.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">No prompt templates yet.</div>
-      ) : (
-        <div className="space-y-2">
-          {templates.map(t => (
-            <div key={t.id} className="bg-white border border-gray-200 rounded-lg p-4 flex items-start justify-between">
-              <div className="flex-1 min-w-0 mr-4">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <span className="font-medium text-gray-900 text-sm font-mono">{t.name}</span>
-                  <span className="text-xs px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded">{t.template_type}</span>
-                  {t.task_ids.length > 0
-                    ? <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{t.task_ids.length} task{t.task_ids.length > 1 ? 's' : ''}</span>
-                    : <span className="text-xs px-1.5 py-0.5 bg-yellow-50 text-yellow-700 rounded">no task assigned</span>
-                  }
-                  {!t.is_active && <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded">Inactive</span>}
+      {/* ── Built-in default prompts ── */}
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowDefaults(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span className="font-semibold text-gray-700 text-sm">Built-in Default Prompts</span>
+            <span className="text-xs text-gray-400 font-normal">— fallback used when no custom template is assigned to a task</span>
+          </div>
+          <svg className={`w-4 h-4 text-gray-400 transition-transform ${showDefaults ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {showDefaults && (
+          <div className="divide-y divide-gray-100">
+            {defaults.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 text-sm">Loading…</div>
+            ) : defaults.map(d => (
+              <div key={d.task_type} className="p-5 bg-white">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${TASK_TYPE_COLORS[d.task_type] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {d.task_type}
+                  </span>
+                  <span className="text-sm font-medium text-gray-700">{d.label}</span>
+                  <span className="ml-auto text-xs text-gray-400 italic">read-only</span>
                 </div>
-                <p className="text-xs text-gray-400 truncate">{t.system_prompt.slice(0, 120)}…</p>
+                <div className="space-y-2">
+                  <PromptBlock label="System Prompt (shared by all task types)" text={d.system_prompt} />
+                  <PromptBlock label="User Prompt Template" text={d.user_prompt} />
+                </div>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <button onClick={() => setSelected(t)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Edit</button>
-                <button onClick={() => deleteTemplate(t.id)} className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50">Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
+
     </div>
   )
 }
