@@ -40,6 +40,8 @@ export default function ScenarioList() {
   const [practiceHistory, setPracticeHistory] = useState<Map<string, string[]>>(new Map())
   // Maps scenario_id → attempt_id for in-progress/created practice attempts
   const [inProgressPracticeAttempts, setInProgressPracticeAttempts] = useState<Map<string, string>>(new Map())
+  // Set of scenario_ids whose practice history panel is expanded
+  const [expandedPracticeHistory, setExpandedPracticeHistory] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) { navigate('/login'); return }
@@ -369,36 +371,56 @@ export default function ScenarioList() {
                       </div>
                     )}
 
-                    {/* Practice History */}
+                    {/* Practice History — collapsible */}
                     {practiceHistory.has(scenario.id) && (() => {
                       const ids = practiceHistory.get(scenario.id)!
+                      const expanded = expandedPracticeHistory.has(scenario.id)
+                      const toggle = () => setExpandedPracticeHistory(prev => {
+                        const next = new Set(prev)
+                        expanded ? next.delete(scenario.id) : next.add(scenario.id)
+                        return next
+                      })
                       return (
                         <div className="border-t border-gray-100 pt-3">
-                          <p className="text-xs font-medium text-purple-700 mb-2 flex items-center gap-1">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                          <button
+                            onClick={toggle}
+                            className="w-full flex items-center justify-between text-xs font-medium
+                              text-purple-700 hover:text-purple-900 transition-colors"
+                          >
+                            <span className="flex items-center gap-1">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                              </svg>
+                              Practice History ({ids.length} session{ids.length > 1 ? 's' : ''})
+                            </span>
+                            <svg
+                              className={`w-3.5 h-3.5 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+                              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                             </svg>
-                            Practice History ({ids.length} session{ids.length > 1 ? 's' : ''})
-                          </p>
-                          <div className="flex flex-col gap-1">
-                            {ids.map((id, idx) => (
-                              <Link
-                                key={id}
-                                to={`/result/${id}`}
-                                className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs
-                                  bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
-                              >
-                                <span>Practice #{ids.length - idx}</span>
-                                <span className="flex items-center gap-1 text-purple-500">
-                                  View Results
-                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                  </svg>
-                                </span>
-                              </Link>
-                            ))}
-                          </div>
+                          </button>
+                          {expanded && (
+                            <div className="flex flex-col gap-1 mt-2">
+                              {ids.map((id, idx) => (
+                                <Link
+                                  key={id}
+                                  to={`/result/${id}`}
+                                  className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs
+                                    bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
+                                >
+                                  <span>Practice #{ids.length - idx}</span>
+                                  <span className="flex items-center gap-1 text-purple-500">
+                                    View Results
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                  </span>
+                                </Link>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )
                     })()}
