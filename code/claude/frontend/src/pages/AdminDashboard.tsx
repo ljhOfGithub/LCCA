@@ -520,6 +520,35 @@ function MaterialCard({ material, taskId, onDelete, onReload }: { material: Mate
   )
 }
 
+// ── TTS constants ──────────────────────────────────────────────────────────────
+
+const TTS_VOICES = [
+  { id: 'Wise_Woman',        label: 'Wise Woman (female, mature)' },
+  { id: 'Calm_Woman',        label: 'Calm Woman (female, calm)' },
+  { id: 'Friendly_Person',   label: 'Friendly Person (neutral)' },
+  { id: 'Lively_Girl',       label: 'Lively Girl (female, upbeat)' },
+  { id: 'Lovely_Girl',       label: 'Lovely Girl (female, soft)' },
+  { id: 'Inspirational_girl',label: 'Inspirational Girl (female, energetic)' },
+  { id: 'Deep_Voice_Man',    label: 'Deep Voice Man (male, deep)' },
+  { id: 'Patient_Man',       label: 'Patient Man (male, calm)' },
+  { id: 'Casual_Guy',        label: 'Casual Guy (male, relaxed)' },
+  { id: 'Elegant_Man',       label: 'Elegant Man (male, refined)' },
+  { id: 'Determined_Man',    label: 'Determined Man (male, firm)' },
+  { id: 'presenter_male',    label: 'Presenter Male (ZH, anchor)' },
+  { id: 'presenter_female',  label: 'Presenter Female (ZH, anchor)' },
+  { id: 'audiobook_male_1',  label: 'Audiobook Male (ZH)' },
+  { id: 'audiobook_female_1',label: 'Audiobook Female (ZH)' },
+]
+
+const TTS_MODELS = [
+  { id: 'speech-02-hd',     label: 'Speech-02 HD (best quality)' },
+  { id: 'speech-02-turbo',  label: 'Speech-02 Turbo (faster)' },
+  { id: 'speech-01-hd',     label: 'Speech-01 HD' },
+  { id: 'speech-01-turbo',  label: 'Speech-01 Turbo' },
+]
+
+// ── MaterialForm ────────────────────────────────────────────────────────────────
+
 function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; initial?: Material; onSave: () => void; onCancel: () => void }) {
   const [type, setType] = useState(initial?.material_type ?? 'advertisement')
   const [content, setContent] = useState(initial?.content ?? '')
@@ -527,16 +556,38 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
   const [error, setError] = useState('')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const isAudio = type === 'audio'
-  const isDocument = FILE_MATERIAL_TYPES.includes(type)
 
+  // TTS state
+  const [audioMode, setAudioMode] = useState<'upload' | 'tts'>('upload')
+  const [ttsText, setTtsText]       = useState('')
+  const [ttsVoice, setTtsVoice]     = useState('Wise_Woman')
+  const [ttsModel, setTtsModel]     = useState('speech-02-hd')
+  const [ttsSpeed, setTtsSpeed]     = useState(1.0)
+  const [ttsVol, setTtsVol]         = useState(1.0)
+  const [ttsPitch, setTtsPitch]     = useState(0)
+  const [ttsFormat, setTtsFormat]   = useState('mp3')
+  const [ttsSampleRate, setTtsSampleRate] = useState(32000)
+
+  const isAudio    = type === 'audio'
+  const isDocument = FILE_MATERIAL_TYPES.includes(type)
   const isFileType = isAudio || isDocument
 
   const handleSave = async () => {
     setSaving(true); setError('')
     try {
-      if (isAudio && uploadFile) {
-        // Upload new audio (endpoint replaces any existing audio material for this task)
+      if (isAudio && audioMode === 'tts') {
+        if (!ttsText.trim()) { setError('Please enter the text to synthesise'); setSaving(false); return }
+        await apiClient.post(`/teacher/tasks/${taskId}/materials/generate-audio-tts`, {
+          text: ttsText,
+          voice_id: ttsVoice,
+          model: ttsModel,
+          speed: ttsSpeed,
+          vol: ttsVol,
+          pitch: ttsPitch,
+          audio_format: ttsFormat,
+          sample_rate: ttsSampleRate,
+        })
+      } else if (isAudio && uploadFile) {
         const form = new FormData()
         form.append('file', uploadFile)
         await apiClient.post(`/teacher/tasks/${taskId}/materials/upload-audio`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
@@ -549,10 +600,8 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
           { headers: { 'Content-Type': 'multipart/form-data' } }
         )
       } else if (initial && isFileType && !uploadFile) {
-        // Editing a file material but no new file chosen — nothing to update
         onSave(); return
       } else if (initial) {
-        // Editing a text material
         await apiClient.put(`/teacher/materials/${initial.id}`, { material_type: type, content: content || null })
       } else {
         if (!content.trim()) { setError('Content is required'); setSaving(false); return }
@@ -567,6 +616,7 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
     <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
       <h4 className="font-semibold text-gray-700 mb-4">{initial ? 'Edit Material' : 'Add Material'}</h4>
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+
       {!initial && (
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-600 mb-1">Material Type</label>
@@ -576,15 +626,36 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
           </select>
         </div>
       )}
-      {isFileType ? (
+
+      {/* Audio: toggle upload / TTS */}
+      {isAudio && (
+        <div className="mb-4">
+          <div className="flex rounded-lg overflow-hidden border border-gray-300 w-fit">
+            {(['upload', 'tts'] as const).map(mode => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setAudioMode(mode)}
+                className={`px-4 py-2 text-sm font-medium transition-colors
+                  ${audioMode === mode
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                {mode === 'upload' ? '⬆ Upload File' : '🎙 Generate from Text (TTS)'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Upload mode (audio or document) */}
+      {isFileType && (!isAudio || audioMode === 'upload') && (
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-600 mb-1">
             {isAudio ? 'Audio File (MP3/WAV)' : 'Document File (PDF/DOCX)'}
           </label>
           {initial?.storage_key && (
-            <p className="text-xs text-gray-400 mb-2">
-              Current: {initial.storage_key.split('/').pop()}
-            </p>
+            <p className="text-xs text-gray-400 mb-2">Current: {initial.storage_key.split('/').pop()}</p>
           )}
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => fileRef.current?.click()}
@@ -603,19 +674,122 @@ function MaterialForm({ taskId, initial, onSave, onCancel }: { taskId: string; i
             onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
           />
         </div>
-      ) : (
+      )}
+
+      {/* TTS mode */}
+      {isAudio && audioMode === 'tts' && (
+        <div className="space-y-4">
+          {/* Script */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Script text <span className="text-gray-400">({ttsText.length} chars)</span>
+            </label>
+            <textarea
+              value={ttsText}
+              onChange={e => setTtsText(e.target.value)}
+              rows={6}
+              placeholder="Enter the text to be read aloud…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y font-mono
+                focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Voice + Model row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Voice</label>
+              <select value={ttsVoice} onChange={e => setTtsVoice(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {TTS_VOICES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Model</label>
+              <select value={ttsModel} onChange={e => setTtsModel(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {TTS_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Sliders row */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Speed <span className="text-blue-600 font-mono">{ttsSpeed.toFixed(1)}×</span>
+              </label>
+              <input type="range" min={0.5} max={2.0} step={0.1} value={ttsSpeed}
+                onChange={e => setTtsSpeed(parseFloat(e.target.value))}
+                className="w-full accent-blue-600" />
+              <div className="flex justify-between text-xs text-gray-400 mt-0.5"><span>0.5×</span><span>2.0×</span></div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Volume <span className="text-blue-600 font-mono">{ttsVol.toFixed(1)}</span>
+              </label>
+              <input type="range" min={0.1} max={10.0} step={0.1} value={ttsVol}
+                onChange={e => setTtsVol(parseFloat(e.target.value))}
+                className="w-full accent-blue-600" />
+              <div className="flex justify-between text-xs text-gray-400 mt-0.5"><span>0.1</span><span>10.0</span></div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Pitch <span className="text-blue-600 font-mono">{ttsPitch > 0 ? `+${ttsPitch}` : ttsPitch}</span>
+              </label>
+              <input type="range" min={-12} max={12} step={1} value={ttsPitch}
+                onChange={e => setTtsPitch(parseInt(e.target.value))}
+                className="w-full accent-blue-600" />
+              <div className="flex justify-between text-xs text-gray-400 mt-0.5"><span>-12</span><span>+12</span></div>
+            </div>
+          </div>
+
+          {/* Format + Sample Rate row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Output Format</label>
+              <select value={ttsFormat} onChange={e => setTtsFormat(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="mp3">MP3</option>
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Sample Rate</label>
+              <select value={ttsSampleRate} onChange={e => setTtsSampleRate(parseInt(e.target.value))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value={16000}>16 kHz</option>
+                <option value={24000}>24 kHz</option>
+                <option value={32000}>32 kHz (recommended)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Text content (non-file types) */}
+      {!isFileType && (
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-600 mb-1">Content</label>
           <textarea value={content} onChange={e => setContent(e.target.value)} rows={8}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
       )}
-      <div className="flex gap-2">
+
+      <div className="flex gap-2 mt-4">
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-          {saving ? 'Saving…' : 'Save'}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+          {saving && (
+            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+          )}
+          {saving
+            ? (isAudio && audioMode === 'tts' ? 'Generating…' : 'Saving…')
+            : (isAudio && audioMode === 'tts' ? '🎙 Generate & Save' : 'Save')}
         </button>
         <button onClick={onCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
       </div>

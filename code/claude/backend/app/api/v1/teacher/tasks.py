@@ -55,6 +55,17 @@ class MaterialUpdate(BaseModel):
     metadata_json: str | None = None
 
 
+class TTSGenerateRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=10000)
+    voice_id: str = "Wise_Woman"
+    model: str = "speech-02-hd"
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    vol: float = Field(default=1.0, ge=0.1, le=10.0)
+    pitch: int = Field(default=0, ge=-12, le=12)
+    audio_format: str = "mp3"
+    sample_rate: int = 32000
+
+
 class MaterialResponse(BaseModel):
     id: str
     task_id: str
@@ -271,6 +282,110 @@ async def upload_audio_material(
     )
     session.add(mat)
     await session.commit()
+    return _mat_out(mat)
+
+
+@router.post("/tasks/{task_id}/materials/generate-audio-tts", response_model=MaterialResponse, status_code=201)
+async def generate_audio_from_tts(
+    task_id: UUID,
+    data: TTSGenerateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_admin()),
+):
+    """Call MiniMax T2A v2 to synthesise speech, upload the result to MinIO,
+    and attach it as the task's audio material (replacing any previous one)."""
+    from app.core.config import settings
+    import boto3, uuid as uuid_lib, asyncio, os, json as _json
+    import httpx, logging
+
+    task = await _get_task_for_admin(task_id, current_user, session)
+
+    api_key = getattr(settings, "llm_api_key", None)
+    if not api_key:
+        raise HTTPException(503, "LLM_API_KEY is not configured")
+
+    # ── Call MiniMax T2A v2 ────────────────────────────────────────────────
+    tts_url = "https://api.minimax.chat/v1/t2a_v2"
+    payload = {
+        "model": data.model,
+        "text": data.text,
+        "stream": False,
+        "voice_setting": {
+            "voice_id": data.voice_id,
+            "speed": data.speed,
+            "vol": data.vol,
+            "pitch": data.pitch,
+        },
+        "audio_setting": {
+            "audio_sample_rate": data.sample_rate,
+            "bitrate": 128000,
+            "format": data.audio_format,
+            "channel": 1,
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                tts_url,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+    except Exception as exc:
+        raise HTTPException(502, f"TTS API request failed: {exc}")
+
+    if resp.status_code != 200:
+        raise HTTPException(502, f"TTS API error {resp.status_code}: {resp.text[:300]}")
+
+    body = resp.json()
+    base = body.get("base_resp", {})
+    if base.get("status_code", 0) != 0:
+        raise HTTPException(502, f"TTS API returned error: {base.get('status_msg', 'unknown')}")
+
+    audio_hex = body.get("data", {}).get("audio", "")
+    if not audio_hex:
+        raise HTTPException(502, "TTS API returned no audio data")
+
+    audio_bytes = bytes.fromhex(audio_hex)
+    ext = data.audio_format
+    content_type = {"mp3": "audio/mpeg", "wav": "audio/wav", "flac": "audio/flac"}.get(ext, "audio/mpeg")
+    storage_key = f"materials/{task_id}/{uuid_lib.uuid4()}.{ext}"
+
+    # ── Upload to MinIO ────────────────────────────────────────────────────
+    def do_upload():
+        boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+        ).put_object(Bucket=settings.s3_bucket, Key=storage_key, Body=audio_bytes, ContentType=content_type)
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, do_upload)
+    except Exception as exc:
+        raise HTTPException(500, f"Storage upload failed: {exc}")
+
+    # ── Replace existing audio material ────────────────────────────────────
+    for old in (await session.execute(
+        select(Material).where(Material.task_id == task_id, Material.material_type == "audio")
+    )).scalars().all():
+        await session.delete(old)
+
+    pub = os.environ.get("S3_PUBLIC_ENDPOINT", settings.s3_endpoint).replace("minio:9000", "localhost:9000")
+    audio_url = f"{pub}/{settings.s3_bucket}/{storage_key}"
+
+    metadata = _json.dumps({"transcript": data.text, "tts_voice": data.voice_id, "tts_model": data.model})
+
+    mat = Material(
+        task_id=task.id,
+        material_type="audio",
+        content=audio_url,
+        storage_key=storage_key,
+        metadata_json=metadata,
+    )
+    session.add(mat)
+    await session.commit()
+    logging.getLogger(__name__).info("TTS audio generated for task %s, key=%s", task_id, storage_key)
     return _mat_out(mat)
 
 
