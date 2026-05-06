@@ -316,9 +316,14 @@ async def start_attempt(
             attempt.status = AttemptStatus.SUBMITTED
             attempt.submitted_at = datetime.now(timezone.utc)
             await session.commit()
-            raise HTTPException(
-                status_code=400,
-                detail="Attempt has timed out and was auto-submitted"
+            # Return current status so frontend can redirect gracefully without an error
+            return AttemptResponse(
+                id=attempt.id,
+                student_id=attempt.student_id,
+                scenario_id=attempt.scenario_id,
+                status=attempt.status.value,
+                is_practice=attempt.is_practice,
+                started_at=attempt.started_at,
             )
 
     # Use state machine for the transition

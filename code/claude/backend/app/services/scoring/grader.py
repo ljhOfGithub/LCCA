@@ -153,9 +153,43 @@ class Scorer:
             # Get submission content
             content = await self._get_submission_content(task_response, task_type)
 
-            # Get rubric and criteria
+            # Get rubric and criteria (needed whether blank or not)
             rubric = await self._get_rubric(task.id)
-            criteria = await self._get_criteria(rubric.id)
+            criteria = await self._get_criteria(rubric.id) if rubric else []
+
+            # Blank submission: no content submitted at all → minimum score (1) per criterion
+            if not content or not content.strip():
+                logger.info(
+                    f"Blank submission for task response {task_response_id} — "
+                    "assigning minimum scores without LLM"
+                )
+                criteria_by_id = {str(c.id): c.name for c in criteria}
+                scores = {
+                    str(c.id): {
+                        "score": 1,
+                        "max_score": c.max_score,
+                        "feedback": "No response provided.",
+                    }
+                    for c in criteria
+                }
+                for criterion_id, score_data in scores.items():
+                    self.session.add(ScoreDetail(
+                        score_run_id=score_run.id,
+                        task_response_id=task_response.id,
+                        criterion_id=uuid.UUID(criterion_id),
+                        criterion_name=criteria_by_id.get(criterion_id, ""),
+                        score=score_data["score"],
+                        max_score=score_data["max_score"],
+                        feedback=score_data["feedback"],
+                    ))
+                score_run.prompt_template_name = "[blank-submission]"
+                score_run.raw_llm_response = "Blank submission — minimum scores assigned without LLM."
+                score_run.status = ScoreRunStatus.COMPLETED
+                score_run.run_completed_at = datetime.now(timezone.utc)
+                task_response.status = TaskResponseStatus.SCORED
+                task_response.scored_at = datetime.now(timezone.utc)
+                await self.session.commit()
+                return {"success": True, "score_run_id": str(score_run.id), "scores": scores}
 
             # Get prompt template (optional) — prefer task-specific assignment
             prompt_template = await self._get_prompt_template(rubric.id, task_id=task.id) if rubric else None
@@ -268,7 +302,7 @@ class Scorer:
             audio_artifacts = artifacts.scalars().all()
 
             if not audio_artifacts:
-                raise ValueError("No audio artifact found for speaking task")
+                return ""  # Blank submission — handled by caller
 
             # Return the storage key (URL) for ASR processing
             return audio_artifacts[0].storage_key
@@ -498,8 +532,17 @@ class Scorer:
         transcription = await asr_client.transcribe(audio_url=audio_storage_key, language="en")
         await asr_client.close()
 
-        if not transcription:
-            raise ValueError("ASR returned empty transcription")
+        if not transcription or not transcription.strip():
+            # Silent/inaudible audio — treat as blank, assign minimum scores
+            scores = {
+                str(c.id): {
+                    "score": 1,
+                    "max_score": c.max_score,
+                    "feedback": "No audible speech detected.",
+                }
+                for c in criteria
+            }
+            return scores, None, None, None
 
         if prompt_template:
             vars = self._build_template_vars(task, criteria, transcription=transcription)

@@ -127,10 +127,16 @@ export default function ScenarioRunner() {
       setTaskStatuses(initialStatuses)
 
       // Start attempt — response always contains started_at (set on first start, preserved on resume)
-      const startRes = await attemptApi.start(aid)
-      if (startRes.data.status !== 'in_progress') {
-        alert('You have already submitted this exam.')
-        navigate('/')
+      let startRes
+      try {
+        startRes = await attemptApi.start(aid)
+      } catch (err: any) {
+        // 400 = timed out (auto-submitted) or attempt already finalized; redirect away
+        navigate('/', { state: { submitted: true } })
+        return
+      }
+      if (!startRes || startRes.data.status !== 'in_progress') {
+        navigate('/', { state: { submitted: true } })
         return
       }
 

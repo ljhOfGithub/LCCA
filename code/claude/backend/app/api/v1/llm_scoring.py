@@ -465,6 +465,61 @@ async def score_attempt(
                 )
             submission_for_vars = transcript or ""
 
+        # Blank submission: skip LLM entirely and assign minimum score (1) per criterion
+        is_blank = (
+            (task_type != "speaking" and not submission_for_vars.strip()) or
+            (task_type == "speaking" and not recording_map)
+        )
+        if is_blank:
+            task_score = 0.0
+            task_max = 0.0
+            criteria_scores = []
+            old_runs = await session.execute(select(ScoreRun).where(ScoreRun.task_response_id == tr.id))
+            for old_run in old_runs.scalars().all():
+                await session.delete(old_run)
+            await session.flush()
+            run_time = datetime.now(timezone.utc)
+            score_run = ScoreRun(
+                task_response_id=tr.id,
+                status=ScoreRunStatus.COMPLETED,
+                run_started_at=run_time,
+                run_completed_at=run_time,
+                raw_llm_response=json.dumps({"overall_feedback": "No response submitted.", "cefr_level": "A1"}),
+                prompt_template_name="[blank-submission]",
+            )
+            session.add(score_run)
+            await session.flush()
+            for crit in criteria:
+                crit_name = crit["name"]
+                crit_max = crit["max_score"]
+                task_score += 1.0
+                task_max += crit_max
+                session.add(ScoreDetail(
+                    score_run_id=score_run.id,
+                    task_response_id=tr.id,
+                    criterion_id=crit["obj"].id if crit["obj"] else None,
+                    criterion_name=crit_name,
+                    score=1.0,
+                    max_score=crit_max,
+                    feedback="No response provided.",
+                ))
+                criteria_scores.append({"name": crit_name, "score": 1.0, "max": crit_max, "feedback": "No response provided."})
+            total_score += task_score
+            total_max += task_max
+            cefr_votes.append("A1")
+            task_results.append(TaskScoreResult(
+                task_id=str(task.id),
+                task_type=task_type,
+                task_title=task.title,
+                score=task_score,
+                max_score=task_max,
+                cefr_level="A1",
+                overall_feedback="No response submitted.",
+                transcript=None,
+                criteria_scores=criteria_scores,
+            ))
+            continue
+
         # Look up prompt template assigned to this task
         pt = await _get_task_template(session, task)
         if pt:
