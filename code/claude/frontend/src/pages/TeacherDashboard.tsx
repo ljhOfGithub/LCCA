@@ -104,7 +104,7 @@ export default function TeacherDashboard({ userName }: { userName: string }) {
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            LLM 日志
+            LLM Logs
           </button>
           <span className="px-2 py-0.5 bg-teal-50 text-teal-600 rounded text-xs font-medium">Teacher</span>
           <span>{userName}</span>
@@ -144,7 +144,7 @@ function AttemptCard({ a, action }: { a: AttemptSummary; action: React.ReactNode
           }`}>{a.status}</span>
           <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
             a.is_practice ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-          }`}>{a.is_practice ? '练习模式' : '正式模式'}</span>
+          }`}>{a.is_practice ? 'Practice' : 'Exam'}</span>
           {a.cefr_level && <span className="font-semibold text-blue-600 text-sm">{a.cefr_level}</span>}
           {pct != null && <span className="text-xs text-gray-500">{pct}%</span>}
           {a.is_finalized && <span className="text-xs text-green-600 font-medium">Finalised</span>}
@@ -179,7 +179,7 @@ function StudentFilter({ onFilter }: { onFilter: (num: string, name: string, dat
       <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && apply()}
         placeholder="Student name…"
         className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-      <span className="text-xs text-gray-400 ml-1">提交日期</span>
+      <span className="text-xs text-gray-400 ml-1">Submitted</span>
       <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
         className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       <span className="text-xs text-gray-400">—</span>
@@ -489,7 +489,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
               }`}>{attempt.is_finalized ? 'Finalised' : 'Pending review'}</span>
               <span className={`px-2 py-0.5 rounded font-medium text-xs ${
                 attempt.is_practice ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-              }`}>{attempt.is_practice ? '练习模式' : '正式模式'}</span>
+              }`}>{attempt.is_practice ? 'Practice' : 'Exam'}</span>
               {attempt.cefr_level && <span className="text-blue-700 font-bold text-lg">{attempt.cefr_level}</span>}
               {totalMax > 0 && <span className="text-gray-600">{pct}% ({totalScore.toFixed(1)} / {totalMax} pts)</span>}
             </div>
@@ -586,7 +586,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                   <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
-                  <span className="text-xs text-gray-500 font-medium">Prompt 详情</span>
+                  <span className="text-xs text-gray-500 font-medium">Prompt Details</span>
                   {task.prompt_template_name && (
                     <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${
                       task.prompt_template_name.startsWith('[default:')
@@ -606,7 +606,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                       </pre>
                     </div>
                   ) : (
-                    <p className="text-xs text-gray-400 italic pt-3">System prompt 未记录（旧评分记录）</p>
+                    <p className="text-xs text-gray-400 italic pt-3">System prompt not recorded (legacy scoring run)</p>
                   )}
                   {task.rendered_user_prompt ? (
                     <div>
@@ -616,7 +616,7 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
                       </pre>
                     </div>
                   ) : (
-                    <p className="text-xs text-gray-400 italic">User prompt 未记录（旧评分记录）</p>
+                    <p className="text-xs text-gray-400 italic">User prompt not recorded (legacy scoring run)</p>
                   )}
                 </div>
               </details>
