@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import WebmAudioPlayer from '../components/WebmAudioPlayer'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -161,15 +163,20 @@ function AttemptCard({ a, action }: { a: AttemptSummary; action: React.ReactNode
 
 // ── Student + date filter bar ──────────────────────────────────────────────────
 
+const toYMD = (d: Date | null) =>
+  d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : ''
+
 function StudentFilter({ onFilter }: { onFilter: (num: string, name: string, dateFrom: string, dateTo: string) => void }) {
   const [num, setNum] = useState('')
   const [name, setName] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [dateFrom, setDateFrom] = useState<Date | null>(null)
+  const [dateTo, setDateTo] = useState<Date | null>(null)
 
-  const apply = () => onFilter(num.trim(), name.trim(), dateFrom, dateTo)
-  const clear = () => { setNum(''); setName(''); setDateFrom(''); setDateTo(''); onFilter('', '', '', '') }
+  const apply = () => onFilter(num.trim(), name.trim(), toYMD(dateFrom), toYMD(dateTo))
+  const clear = () => { setNum(''); setName(''); setDateFrom(null); setDateTo(null); onFilter('', '', '', '') }
   const hasFilter = num || name || dateFrom || dateTo
+
+  const inputClass = 'border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-blue-500'
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -180,11 +187,30 @@ function StudentFilter({ onFilter }: { onFilter: (num: string, name: string, dat
         placeholder="Student name…"
         className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       <span className="text-xs text-gray-400 ml-1">Submitted</span>
-      <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-        className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <DatePicker
+        selected={dateFrom}
+        onChange={(d: Date | null) => setDateFrom(d)}
+        selectsStart
+        startDate={dateFrom}
+        endDate={dateTo}
+        placeholderText="Start date"
+        dateFormat="yyyy-MM-dd"
+        locale="en"
+        className={inputClass}
+      />
       <span className="text-xs text-gray-400">—</span>
-      <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-        className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <DatePicker
+        selected={dateTo}
+        onChange={(d: Date | null) => setDateTo(d)}
+        selectsEnd
+        startDate={dateFrom}
+        endDate={dateTo}
+        minDate={dateFrom ?? undefined}
+        placeholderText="End date"
+        dateFormat="yyyy-MM-dd"
+        locale="en"
+        className={inputClass}
+      />
       <button onClick={apply}
         className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
         Search
