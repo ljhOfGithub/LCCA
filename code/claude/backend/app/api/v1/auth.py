@@ -1,6 +1,6 @@
 """Authentication endpoints: login, register, password management."""
-from datetime import timedelta
-from typing import Annotated
+from datetime import datetime, timedelta
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -51,6 +51,8 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     role: str
+    created_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -182,6 +184,7 @@ def _build_user_response(current_user: User) -> UserResponse:
         is_active=current_user.is_active,
         is_superuser=current_user.is_superuser,
         role=role,
+        created_at=current_user.created_at,
     )
 
 
