@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authApi, resultApi } from '../api/client'
+import apiClient from '../api/client'
 
 interface UserInfo {
   id: string
@@ -27,6 +28,15 @@ export default function ProfilePage() {
   const [results, setResults] = useState<AttemptSummary[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Change password form state
+  const [pwOpen, setPwOpen] = useState(false)
+  const [oldPw, setOldPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState(false)
+
   useEffect(() => {
     if (!localStorage.getItem('access_token')) { navigate('/login'); return }
 
@@ -52,6 +62,26 @@ export default function ProfilePage() {
   const handleLogout = () => {
     localStorage.removeItem('access_token')
     navigate('/login')
+  }
+
+  const handleChangePassword = async () => {
+    setPwError('')
+    if (!oldPw) { setPwError('Please enter your current password'); return }
+    if (newPw.length < 6) { setPwError('New password must be at least 6 characters'); return }
+    if (newPw !== confirmPw) { setPwError('New passwords do not match'); return }
+    setPwSaving(true)
+    try {
+      await apiClient.post('/change-password', null, {
+        params: { old_password: oldPw, new_password: newPw },
+      })
+      setPwSuccess(true)
+      setOldPw(''); setNewPw(''); setConfirmPw('')
+      setTimeout(() => { setPwSuccess(false); setPwOpen(false) }, 2000)
+    } catch (e: any) {
+      setPwError(e?.response?.data?.detail || 'Failed to change password')
+    } finally {
+      setPwSaving(false)
+    }
   }
 
   if (loading) {
@@ -133,6 +163,88 @@ export default function ProfilePage() {
               <p className="text-xs text-gray-500 mt-1">Average Score</p>
             </div>
           </div>
+        </div>
+
+        {/* Change password card */}
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <button
+            onClick={() => { setPwOpen(v => !v); setPwError(''); setPwSuccess(false) }}
+            className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <span className="text-sm font-semibold text-gray-700">Change Password</span>
+            </div>
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${pwOpen ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {pwOpen && (
+            <div className="border-t border-gray-100 px-6 py-5 space-y-4">
+              {pwSuccess && (
+                <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 text-sm">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Password changed successfully.
+                </div>
+              )}
+              {pwError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{pwError}</p>
+              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Current Password</label>
+                <input
+                  type="password"
+                  value={oldPw}
+                  onChange={e => setOldPw(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter current password"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">New Password</label>
+                <input
+                  type="password"
+                  value={newPw}
+                  onChange={e => setNewPw(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="At least 6 characters"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Confirm New Password</label>
+                <input
+                  type="password"
+                  value={confirmPw}
+                  onChange={e => setConfirmPw(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Re-enter new password"
+                />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={handleChangePassword}
+                  disabled={pwSaving}
+                  className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {pwSaving ? 'Saving…' : 'Update Password'}
+                </button>
+                <button
+                  onClick={() => { setPwOpen(false); setOldPw(''); setNewPw(''); setConfirmPw(''); setPwError('') }}
+                  className="px-5 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
       </main>

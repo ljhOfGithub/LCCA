@@ -32,6 +32,7 @@ class AttemptSummary(BaseModel):
     submitted_at: datetime | None
     has_result: bool
     is_finalized: bool
+    is_practice: bool
     cefr_level: str | None
     overall_score: float | None
     overall_score_max: float | None
@@ -114,6 +115,7 @@ async def list_scenario_attempts(
             submitted_at=a.submitted_at,
             has_result=a.id in results_by_attempt,
             is_finalized=results_by_attempt[a.id].is_finalized if a.id in results_by_attempt else False,
+            is_practice=a.is_practice,
             cefr_level=results_by_attempt[a.id].cefr_level if a.id in results_by_attempt else None,
             overall_score=results_by_attempt[a.id].overall_score if a.id in results_by_attempt else None,
             overall_score_max=results_by_attempt[a.id].overall_score_max if a.id in results_by_attempt else None,
@@ -180,6 +182,7 @@ class AttemptDetail(BaseModel):
     band_score: float | None
     teacher_notes: str | None
     is_finalized: bool
+    is_practice: bool
     student_number: str | None
     student_name: str | None
     student_email: str | None
@@ -347,6 +350,7 @@ async def get_attempt_detail(
         band_score=ar.band_score if ar else None,
         teacher_notes=ar.teacher_notes if ar else None,
         is_finalized=ar.is_finalized if ar else False,
+        is_practice=attempt.is_practice,
         student_number=student.student_number if student else None,
         student_name=student.user.full_name if student and student.user else None,
         student_email=student.user.email if student and student.user else None,

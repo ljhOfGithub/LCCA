@@ -20,6 +20,7 @@ interface AttemptSummary {
   submitted_at: string | null
   has_result: boolean
   is_finalized: boolean
+  is_practice: boolean
   cefr_level: string | null
   overall_score: number | null
   overall_score_max: number | null
@@ -81,6 +82,7 @@ interface AttemptDetail {
   band_score: number | null
   teacher_notes: string | null
   is_finalized: boolean
+  is_practice: boolean
   student_number: string | null
   student_name: string | null
   student_email: string | null
@@ -140,6 +142,9 @@ function AttemptCard({ a, action }: { a: AttemptSummary; action: React.ReactNode
             : a.status === 'submitted' ? 'bg-amber-100 text-amber-700'
             : 'bg-gray-100 text-gray-600'
           }`}>{a.status}</span>
+          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+            a.is_practice ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+          }`}>{a.is_practice ? '练习模式' : '正式模式'}</span>
           {a.cefr_level && <span className="font-semibold text-blue-600 text-sm">{a.cefr_level}</span>}
           {pct != null && <span className="text-xs text-gray-500">{pct}%</span>}
           {a.is_finalized && <span className="text-xs text-green-600 font-medium">Finalised</span>}
@@ -482,6 +487,9 @@ function AttemptReviewPanel({ attempt, onBack, onReload }: {
               <span className={`px-2 py-0.5 rounded font-medium text-xs ${
                 attempt.is_finalized ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
               }`}>{attempt.is_finalized ? 'Finalised' : 'Pending review'}</span>
+              <span className={`px-2 py-0.5 rounded font-medium text-xs ${
+                attempt.is_practice ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+              }`}>{attempt.is_practice ? '练习模式' : '正式模式'}</span>
               {attempt.cefr_level && <span className="text-blue-700 font-bold text-lg">{attempt.cefr_level}</span>}
               {totalMax > 0 && <span className="text-gray-600">{pct}% ({totalScore.toFixed(1)} / {totalMax} pts)</span>}
             </div>
